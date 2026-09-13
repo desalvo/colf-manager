@@ -1,33 +1,33 @@
-# colf-manager hardening overlay r6
+# colf-manager CI/CD overlay r7
 
-Apply this archive over a **fresh, complete clone** of `desalvo/colf-manager`.
-Do not run it from a directory containing only a previous overlay.
+Questo overlay aggiorna esclusivamente i workflow GitHub Actions.
 
-## Clean verification
+Modifiche:
+- actions/checkout: v4 -> v6 (Node 24)
+- actions/setup-python: v5 -> v6 (Node 24)
+- github/codeql-action: v3 -> v4
+- aquasecurity/trivy-action: 0.31.0 -> v0.36.0
+- nessuna modifica alla logica di pubblicazione Docker Hub
+
+Applicazione:
 
 ```bash
-cd /root
-mv colf-manager colf-manager-old 2>/dev/null || true
-git clone https://github.com/desalvo/colf-manager.git
-cd colf-manager
-unzip -o /path/to/colf-manager-v1.0.0-hardening-overlay-r6.zip
-
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-scripts/prepare-local-checks.sh
-
-# This is the only verification command needed:
-scripts/check-all.sh
+cd /root/colf-manager
+unzip -o /percorso/colf-manager-ci-overlay-r7.zip
+git diff -- .github/workflows
+git add .github/workflows
+git commit -m "Fix GitHub Actions and Docker latest publishing"
+git push origin main
 ```
 
-The scripts print `overlay r6` in their first line. If you do not see that text,
-you are running an older script and should stop before interpreting its errors.
+Dopo il push:
+1. CI / production gates: test, security e manifests devono essere verdi.
+2. production-gate deve partire.
+3. Publish Docker latest deve partire e pubblicare desalvo/colf-manager:latest.
 
-`check-all.sh` performs Ruff autofix/formatting, strict lint/format verification,
-pytest with coverage, Bandit, pip-audit, Docker Compose validation using temporary
-validation-only environment variables, Alembic-head validation and the full
-production artifact gate.
+Se Publish Docker latest fallisce al login, verificare in GitHub:
+Settings -> Secrets and variables -> Actions -> Repository secrets:
+- DOCKERHUB_USERNAME
+- DOCKERHUB_TOKEN
 
-You do **not** need a real `.env` for verification. Create `.env` only before
-actually starting the application.
+Non usare un token Docker Hub scaduto o una password account al posto del token.

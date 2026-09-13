@@ -2,10 +2,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager hardening overlay r8: production gate =="
+echo "== colf-manager hardening overlay r10: production gate =="
 
-if [[ -z "${VIRTUAL_ENV:-}" ]]; then
-  echo "ERROR: activate .venv first." >&2
+# Local runs should use the project virtualenv; GitHub Actions uses
+# actions/setup-python and therefore has no VIRTUAL_ENV by design.
+if [[ "${GITHUB_ACTIONS:-}" != "true" && -z "${VIRTUAL_ENV:-}" ]]; then
+  echo "ERROR: activate .venv first for local execution." >&2
   exit 2
 fi
 
@@ -41,8 +43,10 @@ if current < Version("7.0.0"):
     raise SystemExit(f"Twine >= 7.0.0 required for Core Metadata 2.5; found {current}")
 print(f"Twine metadata validator: {current}")
 PY
+
 twine check dist/colf_manager-*.whl dist/colf_manager-*.tar.gz
 cyclonedx-py environment --output-format JSON --output-file dist/colf-manager-sbom.json
+
 python - <<'PY'
 import json
 from pathlib import Path
@@ -60,15 +64,18 @@ required = [
     Path("src/colf_manager/static/logo.png"),
     Path("migrations/versions/1000_hardened_baseline.py"),
 ]
+
 missing = [str(path) for path in required if not path.is_file() or path.stat().st_size == 0]
 if missing:
     raise SystemExit(f"Missing production artifacts: {missing}")
+
 pages = {str(path): len(PdfReader(path).pages) for path in required if path.suffix == ".pdf"}
 if any(count < 2 for count in pages.values()):
     raise SystemExit(f"Incomplete manuals: {pages}")
+
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r8",
+    "overlay_revision": "r10",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -88,8 +95,9 @@ evidence = {
         "artifacts",
     ],
 }
+
 Path("dist").mkdir(exist_ok=True)
 Path("dist/production-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
 PY
 
-echo "Production gate r8 passed."
+echo "Production gate r10 passed."

@@ -1,46 +1,47 @@
 # colf-manager 1.0.0
 
-![colf-manager](src/colf_manager/static/logo.svg)
+<img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
-Web application for a private employer to record a domestic worker's hours, workplaces, historical hourly rates, paid vacation, unpaid leave, paid/unpaid sickness, employer/worker advances, expenses, TFR accrual, documents and management reports.
-
-Italian documentation: [README.it.md](README.it.md) · [Manuale](docs/MANUAL.it.md) · [English manual](docs/MANUAL.en.md)
+Web application for a private employer to record a domestic worker's hours, workplaces, effective-dated rates, leave, sickness, employer/worker advances, expenses, TFR accrual, documents and management reports.
 
 ## Quick start
 
 ```bash
 cp .env.example .env
-# replace every sample secret
+# replace EVERY sample value with real secrets
 docker compose up -d --build
 ```
 
-Open `http://localhost:8000`. The initial user is `admin`; the password is the value of `COLF_MANAGER_ADMIN_PASSWORD` at first start.
+Open `http://localhost:8000`. The initial user is `admin`; its initial password is `COLF_MANAGER_ADMIN_PASSWORD` and must be changed on first login. Production mode refuses to start with missing or placeholder secrets.
 
-The calendar supports direct entry and drag-and-drop rescheduling. Hourly rates are effective-dated, so historical reports keep the correct rate. PostgreSQL stores structured data; the application volume stores uploaded documents.
+For local HTTP Docker Compose keep `COLF_MANAGER_SECURE_COOKIES=0`; set it to `1` behind HTTPS/Ingress. Login is rate-limited, state-changing requests are CSRF-protected, and session cookies use HttpOnly/SameSite. Administrators can create additional users from the **Users** page.
 
-The responsive photographic interface uses distinct imagery for login, dashboard, calendar, worker profile, expenses, documents and reports. The logo is shown in the application and both PDF manuals.
+The calendar supports direct entry and drag-and-drop rescheduling. Rates are effective-dated and unique per worker/effective date. Paid absences spanning months or rate changes are split across the applicable days. Worker advances increase the amount due as reimbursements; employer advances reduce it as recoveries.
 
-`scripts/production-gate.sh` emits reviewable evidence. GitHub Actions runs Python 3.11-3.13, CodeQL, secret scanning, manifest validation, multi-architecture image builds, Trivy, SBOM and provenance attestation on explicit `ubuntu-24.04` runners.
+Uploads are limited to PDF/JPEG/PNG and validate extension, MIME type and file signature while storing SHA-256 and size. Authentication, password changes, key business operations and document downloads are audit-logged.
+
+## Database migrations
+
+Flask-Migrate/Alembic is enabled. Databases created by the original 1.0.0 build receive a compatibility upgrade at startup without destructive recreation. After a backup and successful hardened deployment, establish the baseline with:
+
+```bash
+flask --app colf_manager.app:create_app db stamp 1000_hardened_baseline
+```
+
+All later schema changes should use reviewed Alembic revisions and `flask db upgrade`.
+
+## Kubernetes
+
+`kubernetes/colf-manager.yaml` includes TLS ingress, security contexts, resource limits, application/database/backup PVCs, PostgreSQL ingress restriction and a daily `pg_dump` CronJob with 14-day local retention. Replace all `CHANGE_ME` values and configure host, ingress class, TLS secret and optional `storageClassName` before deployment. See `kubernetes/README.md`.
+
+## Quality and release
+
+CI covers Python 3.11-3.13, Ruff, pytest with an 85% coverage gate, Bandit, pip-audit, gitleaks, Trivy, kubeconform, CodeQL, multi-architecture image builds, SBOM and provenance. `scripts/production-gate.sh` also validates the Alembic baseline.
 
 ## Production boundary
 
-colf-manager is a management and calculation-support tool. Its payroll and annual certificate are editable support statements, not automatic INPS filings, an official Certificazione Unica, or professional legal/payroll advice. Before payment or filing, verify the current domestic-work CCNL, INPS contribution tables, tax rules and the worker's specific contract.
+Payroll/TFR outputs are management-support documents. They do not submit INPS filings and do not replace official CU documents, professional payroll/legal advice or verification of the current domestic-work CCNL.
 
-## Deployment and release
+Documentation: [Italian README](README.it.md) · [Italian manual](docs/MANUAL.it.md) · [English manual](docs/MANUAL.en.md)
 
-- Docker Compose: `docker-compose.yml`
-- Kubernetes: `kubernetes/colf-manager.yaml`
-- stable image from `main`: `desalvo/colf-manager:latest`
-- release image: `desalvo/colf-manager:1.0.0`
-- full release gate: `scripts/release-check.sh`
-- packages: `scripts/build-package.sh`
-- release: push a signed `v1.0.0` tag after CI passes
-
-Before the first push, configure the GitHub Actions secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`. Before the first release tag, also configure `RELEASE_GPG_PUBLIC_KEY` with the ASCII-armored public key used to sign the tag. The `main` branch publishes only `latest`; `vX.Y.Z` tags publish only their matching `X.Y.Z` image.
-
-Docker Compose uses `latest` by default. To pin a release, run `COLF_MANAGER_IMAGE_TAG=1.0.0 docker compose up -d`.
-
-Manuals: [Italian source](docs/MANUAL.it.md) · [Italian PDF](output/pdf/colf-manager-manual-v1.0.0-it.pdf) · [English source](docs/MANUAL.en.md) · [English PDF](output/pdf/colf-manager-manual-v1.0.0-en.pdf)
-
-Author: Alessandro De Salvo <braket71@gmail.com>  
-License: EUPL-1.2
+Author: Alessandro De Salvo · License: EUPL-1.2

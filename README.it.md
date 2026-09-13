@@ -1,6 +1,6 @@
 # colf-manager 1.0.0
 
-![colf-manager](src/colf_manager/static/logo.svg)
+<img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
 Applicazione web per il datore di lavoro domestico: ore e luoghi, tariffe storicizzate, ferie, permessi, malattia, anticipi e rimborsi, TFR, documenti, riepiloghi e prospetti paga.
 
@@ -8,35 +8,40 @@ Applicazione web per il datore di lavoro domestico: ore e luoghi, tariffe storic
 
 ```bash
 cp .env.example .env
-# sostituire tutti i segreti di esempio
+# sostituire TUTTI i valori di esempio con segreti reali
 docker compose up -d --build
 ```
 
-Aprire `http://localhost:8000`. L'utente iniziale è `admin`; la password è quella definita in `COLF_MANAGER_ADMIN_PASSWORD` al primo avvio.
+Aprire `http://localhost:8000`. L'utente iniziale è `admin`; la password è quella definita in `COLF_MANAGER_ADMIN_PASSWORD`. Al primo accesso viene richiesto il cambio password. In modalità produzione l'applicazione rifiuta di avviarsi con segreti mancanti o placeholder.
 
-Il calendario permette inserimento e spostamento drag & drop. Ogni tariffa ha una data di decorrenza e i report storici usano quella valida nel giorno lavorato. PostgreSQL conserva i dati; il volume applicativo conserva gli allegati.
+Per Docker Compose in HTTP locale `COLF_MANAGER_SECURE_COOKIES=0`; dietro HTTPS/Ingress impostarlo a `1`. Il login è protetto da rate limiting, tutte le operazioni mutative da CSRF e le sessioni usano cookie HttpOnly/SameSite. Gli amministratori possono creare ulteriori utenti da **Utenti**.
 
-L'interfaccia fotografica responsive utilizza immagini distinte per accesso, panoramica, calendario, anagrafica, spese, documenti e report. Il logo è presente nell'app e in entrambi i manuali PDF.
+Il calendario permette inserimento e spostamento drag & drop. Le tariffe sono storicizzate e univoche per lavoratrice/data di decorrenza. Le assenze retribuite che attraversano mesi o cambi tariffa vengono ripartite sui giorni interessati. Gli anticipi della lavoratrice aumentano il dovuto (rimborso), quelli del datore lo riducono (recupero).
 
-Il gate `scripts/production-gate.sh` produce evidenze verificabili; GitHub Actions esegue matrice Python 3.11-3.13, CodeQL, ricerca segreti, validazione dei manifesti, build multiarch, Trivy, SBOM e attestazione di provenienza su runner espliciti `ubuntu-24.04`.
+Gli upload accettano solo PDF/JPEG/PNG, verificano estensione, MIME e firma del file e memorizzano SHA-256 e dimensione. Login, cambio password, operazioni principali e download documenti sono tracciati nell'audit applicativo.
 
-## Distribuzione e release
+## Database e migrazioni
 
-- Docker Compose: `docker-compose.yml`
-- Kubernetes: `kubernetes/colf-manager.yaml`
-- immagine stabile da `main`: `desalvo/colf-manager:latest`
-- immagine di release: `desalvo/colf-manager:1.0.0`
-- controllo completo: `scripts/release-check.sh`
-- release: pubblicare il tag firmato `v1.0.0` dopo il superamento della CI
+Flask-Migrate/Alembic è abilitato. I database creati dalla prima build 1.0.0 vengono aggiornati in modo compatibile all'avvio senza ricreazione distruttiva. Dopo avere eseguito un backup e verificato la build hardened:
 
-Prima del primo push configurare i secret GitHub Actions `DOCKERHUB_USERNAME` e `DOCKERHUB_TOKEN`. Prima del primo tag configurare anche `RELEASE_GPG_PUBLIC_KEY` con la chiave pubblica ASCII-armored usata per firmare il tag. Il branch `main` pubblica esclusivamente `latest`; i tag `vX.Y.Z` pubblicano esclusivamente la corrispondente versione `X.Y.Z`.
+```bash
+flask --app colf_manager.app:create_app db stamp 1000_hardened_baseline
+```
 
-Docker Compose usa `latest` per impostazione predefinita. Per bloccare una release specifica: `COLF_MANAGER_IMAGE_TAG=1.0.0 docker compose up -d`.
+Le modifiche schema successive devono usare migrazioni Alembic revisionate e `flask db upgrade`.
+
+## Kubernetes
+
+Il manifest `kubernetes/colf-manager.yaml` include TLS Ingress, security context, limiti risorse, PVC applicazione/database/backup, NetworkPolicy sul PostgreSQL e backup `pg_dump` giornaliero con retention locale di 14 giorni. Prima del deploy sostituire i `CHANGE_ME`, configurare host/Ingress class/TLS secret e, se necessario, `storageClassName`. Vedi `kubernetes/README.md`.
+
+## Qualità e release
+
+La CI esegue Python 3.11-3.13, Ruff, pytest con coverage minimo 85%, Bandit, pip-audit, gitleaks, Trivy, kubeconform, CodeQL, build multiarch, SBOM e provenance. `scripts/production-gate.sh` verifica anche la presenza della baseline Alembic.
 
 ## Limiti d'uso
 
-I calcoli, i prospetti paga e la certificazione annuale sono documenti gestionali di supporto: non inviano comunicazioni INPS e non sostituiscono CU ufficiale, consulente del lavoro o verifica del CCNL vigente.
+I calcoli e i prospetti sono documenti gestionali di supporto: non inviano comunicazioni INPS e non sostituiscono CU ufficiale, consulente del lavoro o verifica del CCNL vigente.
 
-Manuale completo: [sorgente italiano](docs/MANUAL.it.md) · [PDF italiano](output/pdf/colf-manager-manual-v1.0.0-it.pdf) · [English source](docs/MANUAL.en.md) · [English PDF](output/pdf/colf-manager-manual-v1.0.0-en.pdf)
+Manuali: [Italiano](docs/MANUAL.it.md) · [English](docs/MANUAL.en.md)
 
-Autore: Alessandro De Salvo <braket71@gmail.com> · Licenza EUPL-1.2
+Autore: Alessandro De Salvo · Licenza EUPL-1.2

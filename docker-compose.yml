@@ -7,6 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes: ["postgres-data:/var/lib/postgresql/data"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U colf_manager"], interval: 10s, timeout: 5s, retries: 10}
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
   app:
     build: .
@@ -15,6 +16,12 @@ services:
       DATABASE_URL: postgresql+psycopg://colf_manager:${POSTGRES_PASSWORD}@db/colf_manager
       COLF_MANAGER_SECRET_KEY: ${COLF_MANAGER_SECRET_KEY:?set COLF_MANAGER_SECRET_KEY}
       COLF_MANAGER_ADMIN_PASSWORD: ${COLF_MANAGER_ADMIN_PASSWORD:?set COLF_MANAGER_ADMIN_PASSWORD}
+      COLF_MANAGER_PRODUCTION: "1"
+      COLF_MANAGER_SECURE_COOKIES: ${COLF_MANAGER_SECURE_COOKIES:-0}
+      COLF_MANAGER_PROXY_FIX: ${COLF_MANAGER_PROXY_FIX:-0}
+      COLF_MANAGER_SESSION_MINUTES: ${COLF_MANAGER_SESSION_MINUTES:-60}
+      COLF_MANAGER_RATELIMIT_STORAGE: ${COLF_MANAGER_RATELIMIT_STORAGE:-memory://}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
     ports: ["8000:8000"]
     volumes: ["app-data:/data"]
     depends_on: {db: {condition: service_healthy}}

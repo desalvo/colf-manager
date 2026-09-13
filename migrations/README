@@ -1,0 +1,7 @@
+Flask-Migrate/Alembic is enabled for schema changes after the hardened 1.0.0 baseline.
+
+The application contains a one-time compatibility upgrader for databases created by the original 1.0.0 release so they can boot without destructive recreation. Once the hardened release is running and backed up, establish the Alembic baseline with:
+
+  flask --app colf_manager.app:create_app db stamp 1000_hardened_baseline
+
+Future schema changes must be generated with `flask db migrate`, reviewed, committed and applied with `flask db upgrade` before starting the new application version.

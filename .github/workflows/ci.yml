@@ -29,8 +29,10 @@ jobs:
       - uses: actions/setup-python@v6
         with: {python-version: '3.13', cache: pip}
       - run: pip install -e '.[dev]'
-      - run: bandit -q -r src -x tests
-      - run: pip-audit .
+      - name: Static Python security scan
+        run: bandit -q -r src -x tests
+      - name: Python dependency vulnerability audit
+        run: pip-audit .
       - uses: gitleaks/gitleaks-action@v2
         env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
   manifests:
@@ -44,14 +46,20 @@ jobs:
           POSTGRES_PASSWORD: validation-only
           COLF_MANAGER_SECRET_KEY: validation-only-long-secret
           COLF_MANAGER_ADMIN_PASSWORD: validation-only
-      - uses: docker/build-push-action@v6
+      - name: Build runtime image for validation
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
           load: true
           pull: true
+          provenance: false
+          sbom: false
           tags: colf-manager:ci
-      - uses: aquasecurity/trivy-action@v0.36.0
+      - name: Runtime smoke test
+        run: docker run --rm --entrypoint python colf-manager:ci -c "import colf_manager, flask, sqlalchemy; print('runtime imports OK')"
+      - name: Trivy OS vulnerability scan
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'colf-manager:ci'
           format: table
@@ -59,6 +67,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
           scanners: vuln
+          vuln-type: os
       - name: Validate Kubernetes schemas
         run: docker run --rm -v "$PWD:/work" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary /work/kubernetes/colf-manager.yaml
   production-gate:

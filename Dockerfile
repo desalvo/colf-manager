@@ -2,7 +2,8 @@ FROM python:3.13-slim AS build
 
 WORKDIR /build
 
-# Keep the build environment patched and use current packaging tooling.
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN apt-get update \
     && apt-get -y upgrade \
     && rm -rf /var/lib/apt/lists/* \
@@ -14,6 +15,8 @@ COPY src ./src
 RUN pip wheel --no-cache-dir --wheel-dir /wheels .
 
 FROM python:3.13-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Apply Debian security updates available at image build time.
 RUN apt-get update \
@@ -27,10 +30,9 @@ WORKDIR /app
 
 COPY --from=build /wheels /wheels
 
-# Install the application and explicitly move runtime packaging libraries past
-# versions currently flagged by Trivy in the upstream python:3.13-slim image.
+# Install only application/runtime dependencies. Do not add packaging-only
+# libraries to the runtime image.
 RUN python -m pip install --no-cache-dir /wheels/* \
-    && python -m pip install --no-cache-dir --upgrade "setuptools>=78.1.1" "msgpack>=1.2.1" \
     && rm -rf /wheels /root/.cache/pip
 
 RUN mkdir -p /data && chown colf-manager:colf-manager /data

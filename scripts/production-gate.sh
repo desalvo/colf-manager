@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager hardening overlay r6: production gate =="
+echo "== colf-manager hardening overlay r8: production gate =="
 
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: activate .venv first." >&2
@@ -13,8 +13,6 @@ version="$(cat VERSION)"
 test "$version" = "$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
 test "$version" = "$(python -c 'import colf_manager; print(colf_manager.__version__)')"
 
-# Normalize once so an overlay applied to a clean clone cannot fail merely
-# because the archive itself was created before Ruff's canonical formatting.
 ruff check --fix .
 ruff format .
 ruff check .
@@ -70,7 +68,7 @@ if any(count < 2 for count in pages.values()):
     raise SystemExit(f"Incomplete manuals: {pages}")
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r6",
+    "overlay_revision": "r8",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -94,4 +92,4 @@ Path("dist").mkdir(exist_ok=True)
 Path("dist/production-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
 PY
 
-echo "Production gate r6 passed."
+echo "Production gate r8 passed."

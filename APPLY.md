@@ -1,33 +1,28 @@
-# colf-manager CI/CD overlay r7
+# colf-manager hardening overlay r8
 
-Questo overlay aggiorna esclusivamente i workflow GitHub Actions.
-
-Modifiche:
-- actions/checkout: v4 -> v6 (Node 24)
-- actions/setup-python: v5 -> v6 (Node 24)
-- github/codeql-action: v3 -> v4
-- aquasecurity/trivy-action: 0.31.0 -> v0.36.0
-- nessuna modifica alla logica di pubblicazione Docker Hub
+Correzioni:
+- aggiorna i pacchetti Debian della runtime image durante il build;
+- aggiorna setuptools >= 78.1.1 e msgpack >= 1.2.1 nella runtime image;
+- forza `pull: true` nei build GitHub Actions;
+- Trivy resta bloccante su HIGH/CRITICAL con fix disponibili;
+- Trivy usa solo lo scanner vulnerabilità (`scanners: vuln`), perché Gitleaks copre già i secrets;
+- production gate/evidence allineati a r8.
 
 Applicazione:
 
 ```bash
 cd /root/colf-manager
-unzip -o /percorso/colf-manager-ci-overlay-r7.zip
-git diff -- .github/workflows
-git add .github/workflows
-git commit -m "Fix GitHub Actions and Docker latest publishing"
+unzip -o /percorso/colf-manager-hardening-overlay-r8.zip
+
+git diff -- Dockerfile .github/workflows/ci.yml scripts/production-gate.sh
+
+source .venv/bin/activate
+scripts/production-gate.sh
+
+git add Dockerfile .github/workflows/ci.yml scripts/production-gate.sh
+git commit -m "Patch container vulnerabilities and unblock manifests"
 git push origin main
 ```
 
-Dopo il push:
-1. CI / production gates: test, security e manifests devono essere verdi.
-2. production-gate deve partire.
-3. Publish Docker latest deve partire e pubblicare desalvo/colf-manager:latest.
-
-Se Publish Docker latest fallisce al login, verificare in GitHub:
-Settings -> Secrets and variables -> Actions -> Repository secrets:
-- DOCKERHUB_USERNAME
-- DOCKERHUB_TOKEN
-
-Non usare un token Docker Hub scaduto o una password account al posto del token.
+Dopo il push, `manifests` deve completare anche Trivy e kubeconform.
+Se `manifests` passa, partiranno `production-gate` e poi `Publish Docker latest`.

@@ -1,0 +1,85 @@
+name: CI / production gates
+on:
+  push: {branches: [main]}
+  pull_request: {}
+  workflow_dispatch: {}
+permissions: {contents: read}
+concurrency: {group: "ci-${{ github.ref }}", cancel-in-progress: true}
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy: {fail-fast: false, matrix: {python-version: ['3.11', '3.12', '3.13']}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '${{ matrix.python-version }}', cache: pip}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13', cache: pip}
+      - run: pip install -e '.[dev]'
+      - run: bandit -q -r src -x tests
+      - run: pip-audit .
+      - uses: gitleaks/gitleaks-action@v2
+        env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
+  manifests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker compose config --quiet
+        env:
+          POSTGRES_PASSWORD: validation-only
+          COLF_MANAGER_SECRET_KEY: validation-only-long-secret
+          COLF_MANAGER_ADMIN_PASSWORD: validation-only
+      - uses: docker/build-push-action@v6
+        with: {context: ., push: false, load: true, tags: colf-manager:ci}
+      - uses: aquasecurity/trivy-action@0.31.0
+        with: {image-ref: 'colf-manager:ci', format: table, exit-code: '1', severity: 'CRITICAL,HIGH', ignore-unfixed: true}
+      - name: Validate Kubernetes schemas
+        run: docker run --rm -v "$PWD:/work" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary /work/kubernetes/colf-manager.yaml
+  production-gate:
+    needs: [test, security, manifests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13', cache: pip}
+      - run: pip install -e '.[dev]'
+      - run: scripts/production-gate.sh
+      - uses: actions/upload-artifact@v4
+        with: {name: production-evidence, path: 'dist/production-evidence.json', if-no-files-found: error}
+  publish-latest:
+    name: Publish Docker latest
+    needs: [production-gate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          username: '${{ secrets.DOCKERHUB_USERNAME }}'
+          password: '${{ secrets.DOCKERHUB_TOKEN }}'
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: desalvo/colf-manager:latest
+          provenance: mode=max
+          sbom: true

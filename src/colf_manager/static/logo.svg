@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">colf-manager</title>
+  <desc id="desc">An artistic home embraced by a flowing arch and a golden time motif.</desc>
+  <defs>
+    <linearGradient id="bg" x1="54" y1="40" x2="458" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#235e55"/><stop offset=".55" stop-color="#123e39"/><stop offset="1" stop-color="#0a2926"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="165" y1="122" x2="355" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f7d995"/><stop offset=".5" stop-color="#edb85b"/><stop offset="1" stop-color="#cf794e"/>
+    </linearGradient>
+    <linearGradient id="ivory" x1="150" y1="164" x2="340" y2="393" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fffdf7"/><stop offset="1" stop-color="#eee5d5"/>
+    </linearGradient>
+    <radialGradient id="glow"><stop stop-color="#f6cb75" stop-opacity=".42"/><stop offset="1" stop-color="#f6cb75" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#031b18" flood-opacity=".35"/></filter>
+  </defs>
+  <rect x="20" y="20" width="472" height="472" rx="132" fill="url(#bg)"/>
+  <circle cx="370" cy="140" r="112" fill="url(#glow)"/>
+  <path d="M111 337V247c0-93 64-169 145-169 74 0 129 49 145 117" fill="none" stroke="url(#gold)" stroke-width="25" stroke-linecap="round"/>
+  <circle cx="400" cy="206" r="12" fill="#f0bf67"/>
+  <circle cx="405" cy="251" r="8" fill="#e9ad5d" opacity=".8"/>
+  <path d="M128 342c41 50 91 75 149 75 48 0 92-17 130-50" fill="none" stroke="#f8f1e5" stroke-width="17" stroke-linecap="round" opacity=".92"/>
+  <g filter="url(#shadow)">
+    <path d="M158 265 257 177l99 88v111c0 14-11 25-25 25H183c-14 0-25-11-25-25Z" fill="url(#ivory)"/>
+    <path d="m143 271 114-101 114 101" fill="none" stroke="#f5eee2" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M228 401V306c0-17 13-30 30-30h10c17 0 30 13 30 30v95Z" fill="url(#gold)"/>
+    <path d="M257 177 158 265v34l99-87 99 87v-34Z" fill="#2d8376" opacity=".92"/>
+  </g>
+  <path d="M385 111v38l26 17" fill="none" stroke="#fffaf0" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="385" cy="148" r="55" fill="none" stroke="#fffaf0" stroke-width="10" opacity=".96"/>
+  <path d="M92 393c29 39 67 66 112 82" fill="none" stroke="#63a99b" stroke-width="10" stroke-linecap="round" opacity=".55"/>
+</svg>

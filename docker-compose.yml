@@ -1,0 +1,26 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: colf_manager
+      POSTGRES_USER: colf_manager
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U colf_manager"], interval: 10s, timeout: 5s, retries: 10}
+    restart: unless-stopped
+  app:
+    build: .
+    image: desalvo/colf-manager:${COLF_MANAGER_IMAGE_TAG:-latest}
+    environment:
+      DATABASE_URL: postgresql+psycopg://colf_manager:${POSTGRES_PASSWORD}@db/colf_manager
+      COLF_MANAGER_SECRET_KEY: ${COLF_MANAGER_SECRET_KEY:?set COLF_MANAGER_SECRET_KEY}
+      COLF_MANAGER_ADMIN_PASSWORD: ${COLF_MANAGER_ADMIN_PASSWORD:?set COLF_MANAGER_ADMIN_PASSWORD}
+    ports: ["8000:8000"]
+    volumes: ["app-data:/data"]
+    depends_on: {db: {condition: service_healthy}}
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+volumes: {postgres-data: {}, app-data: {}}

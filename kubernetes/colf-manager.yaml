@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: Namespace
+metadata: {name: colf-manager}
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: colf-manager-secrets, namespace: colf-manager}
+type: Opaque
+stringData:
+  postgres-password: CHANGE_ME
+  app-secret: CHANGE_ME_LONG_RANDOM
+  admin-password: CHANGE_ME
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: postgres-data, namespace: colf-manager}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 10Gi}}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: app-data, namespace: colf-manager}
+spec: {accessModes: [ReadWriteOnce], resources: {requests: {storage: 5Gi}}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: postgres, namespace: colf-manager}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: colf-manager-postgres}}
+  strategy: {type: Recreate}
+  template:
+    metadata: {labels: {app: colf-manager-postgres}}
+    spec:
+      securityContext: {fsGroup: 999, seccompProfile: {type: RuntimeDefault}}
+      containers:
+      - name: postgres
+        image: postgres:17-alpine
+        env:
+        - {name: POSTGRES_DB, value: colf_manager}
+        - {name: POSTGRES_USER, value: colf_manager}
+        - name: POSTGRES_PASSWORD
+          valueFrom: {secretKeyRef: {name: colf-manager-secrets, key: postgres-password}}
+        ports: [{containerPort: 5432}]
+        volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+        readinessProbe: {exec: {command: [pg_isready, -U, colf_manager]}, initialDelaySeconds: 8, periodSeconds: 10}
+        resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {cpu: "1", memory: 1Gi}}
+      volumes: [{name: data, persistentVolumeClaim: {claimName: postgres-data}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: postgres, namespace: colf-manager}
+spec: {selector: {app: colf-manager-postgres}, ports: [{port: 5432}]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: colf-manager, namespace: colf-manager}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: colf-manager}}
+  template:
+    metadata: {labels: {app: colf-manager}}
+    spec:
+      securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}, fsGroup: 1000}
+      containers:
+      - name: app
+        image: desalvo/colf-manager:1.0.0
+        env:
+        - name: POSTGRES_PASSWORD
+          valueFrom: {secretKeyRef: {name: colf-manager-secrets, key: postgres-password}}
+        - {name: DATABASE_URL, value: postgresql+psycopg://colf_manager:$(POSTGRES_PASSWORD)@postgres/colf_manager}
+        - name: COLF_MANAGER_SECRET_KEY
+          valueFrom: {secretKeyRef: {name: colf-manager-secrets, key: app-secret}}
+        - name: COLF_MANAGER_ADMIN_PASSWORD
+          valueFrom: {secretKeyRef: {name: colf-manager-secrets, key: admin-password}}
+        ports: [{containerPort: 8000}]
+        volumeMounts: [{name: data, mountPath: /data}]
+        readinessProbe: {httpGet: {path: /healthz, port: 8000}, initialDelaySeconds: 10, periodSeconds: 10}
+        livenessProbe: {httpGet: {path: /healthz, port: 8000}, initialDelaySeconds: 30, periodSeconds: 30}
+        securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}, readOnlyRootFilesystem: true}
+        resources: {requests: {cpu: 100m, memory: 192Mi}, limits: {cpu: "1", memory: 768Mi}}
+      volumes: [{name: data, persistentVolumeClaim: {claimName: app-data}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: colf-manager, namespace: colf-manager}
+spec: {selector: {app: colf-manager}, ports: [{port: 80, targetPort: 8000}]}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: {name: colf-manager, namespace: colf-manager}
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: colf-manager.example.it
+    http: {paths: [{path: /, pathType: Prefix, backend: {service: {name: colf-manager, port: {number: 80}}}}]}

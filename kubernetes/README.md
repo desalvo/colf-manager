@@ -121,7 +121,7 @@ The database Pod therefore runs explicitly as UID/GID 70 and uses `fsGroup: 70`.
 create its Unix socket without requiring `chown`/`chmod` capabilities. The container
 keeps `allowPrivilegeEscalation: false` and drops all Linux capabilities.
 
-For a fresh r27 installation this security context is ready for PostgreSQL 18.6.
+For a fresh r34 installation this security context is ready for PostgreSQL 18.6.
 If the existing PVC contains a PostgreSQL 17 cluster, do **not** simply apply the PostgreSQL
 18 workload to that PVC. Perform the supported 17 → 18 major-version migration described in
 `POSTGRESQL-18-UPGRADE.md`, preferably restoring into a fresh PostgreSQL 18 PVC.

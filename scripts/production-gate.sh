@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager full package r27: production gate =="
+echo "== colf-manager full package r34: production gate =="
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" && -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: activate .venv first for local execution." >&2
@@ -72,6 +72,12 @@ required = [
     Path("output/pdf/colf-manager-manual-v1.0.0-en.pdf"),
     Path("src/colf_manager/static/logo.svg"),
     Path("src/colf_manager/static/logo.png"),
+    Path("src/colf_manager/mailer.py"),
+    Path("src/colf_manager/templates/settings.html"),
+    Path("src/colf_manager/templates/mail_compose.html"),
+    Path("src/colf_manager/templates/rates.html"),
+    Path("src/colf_manager/templates/expense_edit.html"),
+    Path("src/colf_manager/static/calendar.js"),
     Path("migrations/versions/1000_hardened_baseline.py"),
     Path("migrations/versions/1001_employers_vacation_reports.py"),
     Path("migrations/versions/1002_contract_tax_reporting.py"),
@@ -95,7 +101,7 @@ if any(count < 2 for count in pages.values()):
 
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r27-full",
+    "overlay_revision": "r34-full",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -123,4 +129,4 @@ Path("dist/production-evidence.json").write_text(
 )
 PY
 
-echo "Production gate r27 full passed."
+echo "Production gate r34 full passed."

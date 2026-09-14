@@ -75,3 +75,20 @@ The **Locations** section lets users create, view, edit and delete work location
 Generated PDF reports are persisted on application storage and can be downloaded again or manually deleted. Uploaded documents can also be manually deleted. Administrators can create a complete ZIP export containing application database rows, referenced documents and archived reports, and can perform a confirmed full restore. Files present on storage but no longer referenced by the database are automatically removed by the maintenance service after the configured retention period.
 
 The Dashboard can be viewed for a selected month and year. The calendar supports navigation to prior months and retroactive work-entry creation in the displayed period.
+
+## r31: interface, calendar, e-mail and settings
+
+The vertical navigation remains available on desktop, including the calendar, and can be collapsed to an icon rail. On phones and tablets it becomes an accessible drawer that can be dismissed by tapping outside it.
+
+The calendar uses a weekly time-grid: every work entry is visually proportional to its duration. Colours are derived from the worker, employer and location combination. Entries can be edited, resized, moved or deleted directly from the calendar. The right rail shows the latest reusable entry patterns (default 10, configurable) and supports drag-and-drop to create new work entries.
+
+Hourly rates and expenses have complete history management with create, edit and delete operations. Worker/employer expenses are included in payroll reports for the month in which they were recorded.
+
+The **Settings** page (gear icon) centralises the recent-pattern limit, SMTP/SMTPS configuration and available authentication methods. Notifications, stored documents and archived reports can be sent by e-mail directly from the application.
+
+
+Local packaged photographic assets are bundled in `src/colf_manager/static/heroes/`.
+
+
+## r32: report approvals and signatures
+Reports may include an approval section for the worker, employer, both, or no signer. Names are prefilled automatically. Place and date can be edited before generation; the proposed date is the report generation date. Signature information is embedded in the archived PDF. Local hero and photographic assets remain bundled under `src/colf_manager/static/heroes/`.

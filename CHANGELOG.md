@@ -130,3 +130,22 @@
 - Set `fsGroup: 10001` with `fsGroupChangePolicy: OnRootMismatch` for the shared application data PVC.
 - Fix kubelet startup rejection when `runAsNonRoot` is enabled and the image declares the named `colf-manager` user.
 - Mount ephemeral `/tmp` volumes for application and maintenance workloads while keeping `readOnlyRootFilesystem: true`.
+
+## r28-full - 2026-09-14
+
+- Fix mobile navigation placement and make the hamburger consistently available in the top-left sticky header.
+- Scope the application drawer CSS to `.app-sidebar` so the calendar `.side-card` is no longer treated as the global navigation sidebar.
+- Add a full-screen mobile scrim that closes the drawer when tapping outside it.
+- Close the mobile drawer when selecting a navigation link or pressing Escape.
+- Keep desktop navigation behavior unchanged and improve mobile accessibility with `aria-controls` and `aria-expanded`.
+
+## r34-full - 2026-09-14
+
+- Ridisegnata la navigazione: sidebar sempre disponibile, minimizzabile su desktop e drawer accessibile su mobile.
+- Nuovo calendario time-grid con blocchi proporzionali alla durata, colori contestuali, modifica/cancellazione e drag-and-drop degli inserimenti recenti.
+- Aggiunta pagina Impostazioni con limite degli inserimenti rapidi, configurazione SMTP/SMTPS e metodo di autenticazione disponibile.
+- Aggiunto invio via e-mail di notifiche, documenti e report archiviati.
+- CRUD completo per tariffe orarie e spese/rimborsi.
+- Dettaglio delle spese nei report del periodo di competenza.
+- Migliorata la presentazione professionale delle azioni su luoghi, datori, documenti e report.
+- Aggiunte immagini fotografiche contestuali alle diverse aree dell'interfaccia e ridisegnata la testata utente.

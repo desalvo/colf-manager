@@ -75,3 +75,20 @@ La voce **Luoghi** permette di aggiungere, visualizzare, modificare e cancellare
 I report PDF generati vengono conservati nell'applicazione sul volume persistente e possono essere riscaricati o cancellati manualmente. Anche i documenti caricati possono essere cancellati manualmente. Gli amministratori dispongono di un export ZIP completo di database, documenti referenziati e report archiviati e di un import completo con conferma esplicita. I file presenti sul volume ma non più referenziati dal database vengono eliminati automaticamente dal servizio di manutenzione dopo la retention configurata.
 
 La Panoramica può essere consultata scegliendo mese e anno. Il calendario consente di navigare nei mesi precedenti e registrare retroattivamente le ore nel periodo visualizzato.
+
+## Novità r31: interfaccia, calendario, posta e impostazioni
+
+La barra laterale è sempre disponibile nelle viste desktop, incluso il calendario, e può essere minimizzata in una barra compatta a icone. Su smartphone e tablet diventa un drawer accessibile tramite hamburger e richiudibile toccando fuori dal menu.
+
+Il calendario utilizza una vista settimanale a scala oraria: ogni registrazione occupa uno spazio proporzionale alla durata effettiva. I colori sono derivati dalla combinazione di lavoratore, datore e luogo. Le registrazioni possono essere modificate, ridimensionate, spostate o cancellate direttamente dal calendario. La colonna destra propone gli ultimi inserimenti ricorrenti (limite configurabile, predefinito 10), trascinabili su giorno e orario per creare rapidamente nuove ore.
+
+Le tariffe orarie e le spese dispongono di storico completo con inserimento, modifica e cancellazione. Le spese del lavoratore o del datore vengono riportate nei cedolini/report nel mese in cui sono state registrate.
+
+La pagina **Impostazioni** (icona ingranaggio) raccoglie il limite degli inserimenti rapidi, la configurazione SMTP/SMTPS e i metodi di autenticazione disponibili. Documenti, report archiviati e notifiche possono essere inviati via e-mail direttamente dall'applicazione.
+
+
+Local packaged photographic assets are bundled in `src/colf_manager/static/heroes/`.
+
+
+## Novità r32: approvazione e firme nei report
+I report possono includere una sezione di approvazione con firma del lavoratore, del datore di lavoro, di entrambi oppure nessuna firma. I nomi sono precompilati automaticamente. Luogo e data sono modificabili prima della generazione; la data proposta è quella di generazione del report. Le informazioni di firma vengono incorporate nel PDF archiviato. Gli hero e gli elementi fotografici locali restano inclusi nel pacchetto in `src/colf_manager/static/heroes/`.

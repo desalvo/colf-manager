@@ -171,6 +171,9 @@ def test_payroll_pdf(app):
             "payable": Decimal("90.00"),
         }
         assert payroll_pdf(worker, summary, 2026, 1).read(4) == b"%PDF"
+        employer = Employer(first_name="Mario", last_name="Rossi", address="Roma")
+        approval = {"mode": "both", "place": "Roma", "date": date(2026, 9, 14)}
+        assert payroll_pdf(worker, summary, 2026, 1, employer=employer, approval=approval).read(4) == b"%PDF"
 
 
 def test_employer_and_worker_crud(app, client):
@@ -360,3 +363,136 @@ def test_generated_report_is_archived(app, client):
     assert client.post(f"/reports/archive/{report_id}/delete").status_code == 302
     with app.app_context():
         assert GeneratedReport.query.count() == 0
+
+
+def test_rate_history_edit_and_delete(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    assert client.post(
+        "/rates",
+        data={"worker_id": worker_id, "valid_from": "2026-01-01", "amount": "11.50"},
+    ).status_code == 302
+    with app.app_context():
+        rate_id = HourlyRate.query.one().id
+    assert client.get("/rates").status_code == 200
+    assert client.post(
+        f"/rates/{rate_id}/edit",
+        data={"worker_id": worker_id, "valid_from": "2026-01-01", "amount": "12.25", "notes": "Aggiornata"},
+    ).status_code == 302
+    with app.app_context():
+        assert db.session.get(HourlyRate, rate_id).amount == Decimal("12.25")
+    assert client.post(f"/rates/{rate_id}/delete").status_code == 302
+    with app.app_context():
+        assert HourlyRate.query.count() == 0
+
+
+def test_expense_edit_delete_and_monthly_report(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    assert client.post(
+        "/expenses",
+        data={
+            "worker_id": worker_id,
+            "expense_date": "2026-09-10",
+            "description": "Farmacia",
+            "amount": "18.40",
+            "direction": "worker_advance",
+        },
+    ).status_code == 302
+    with app.app_context():
+        expense_id = Expense.query.one().id
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=10))
+        db.session.commit()
+    assert client.post(
+        f"/expenses/{expense_id}/edit",
+        data={
+            "worker_id": worker_id,
+            "expense_date": "2026-09-11",
+            "description": "Farmacia aggiornata",
+            "amount": "20.00",
+            "direction": "worker_advance",
+        },
+    ).status_code == 302
+    response = client.get(f"/reports/payroll.pdf?worker_id={worker_id}&year=2026&month=9")
+    assert response.status_code == 200
+    assert response.data.startswith(b"%PDF")
+    assert client.post(f"/expenses/{expense_id}/delete").status_code == 302
+
+
+def test_calendar_work_edit_delete_and_recent_patterns(app, client):
+    login(client)
+    employer = Employer(first_name="Mario", last_name="Datore")
+    worker = Worker(first_name="Anna", last_name="Lavoratore", employment_start=date(2026, 1, 1))
+    location = Location(name="Casa")
+    with app.app_context():
+        db.session.add_all([employer, worker, location])
+        db.session.flush()
+        worker.employer_id = employer.id
+        db.session.commit()
+        worker_id, location_id = worker.id, location.id
+    response = client.post(
+        "/api/work",
+        json={
+            "worker_id": worker_id,
+            "location_id": location_id,
+            "work_date": "2026-09-14",
+            "start_time": "09:00",
+            "end_time": "12:00",
+            "break_minutes": 15,
+        },
+    )
+    assert response.status_code == 201
+    entry_id = response.json["id"]
+    assert client.get("/calendar").status_code == 200
+    events = client.get("/api/events").json
+    work_event = next(item for item in events if item["id"] == f"work-{entry_id}")
+    assert work_event["extendedProps"]["employer"] == "Mario Datore"
+    assert client.patch(
+        f"/api/work/{entry_id}",
+        json={
+            "worker_id": worker_id,
+            "location_id": location_id,
+            "work_date": "2026-09-15",
+            "start_time": "10:00",
+            "end_time": "13:00",
+            "break_minutes": 0,
+            "notes": "modificata",
+        },
+    ).status_code == 200
+    assert client.delete(f"/api/work/{entry_id}").status_code == 200
+    with app.app_context():
+        assert WorkEntry.query.count() == 0
+
+
+def test_settings_and_mail_notification(app, client, monkeypatch):
+    login(client)
+    assert client.post(
+        "/settings",
+        data={
+            "calendar_recent_limit": "12",
+            "smtp_host": "smtp.example.invalid",
+            "smtp_port": "465",
+            "smtp_security": "ssl",
+            "smtp_username": "user",
+            "smtp_password": "secret",
+            "smtp_from_email": "sender@example.invalid",
+            "smtp_from_name": "Colf Manager",
+        },
+    ).status_code == 302
+    sent = {}
+
+    def fake_send(settings, to_address, subject, body, attachments=None):
+        sent.update({"settings": settings, "to": to_address, "subject": subject, "body": body})
+
+    monkeypatch.setattr("colf_manager.app.send_smtp_message", fake_send)
+    assert client.post(
+        "/mail/compose",
+        data={
+            "artifact_type": "notification",
+            "to": "recipient@example.invalid",
+            "subject": "Avviso",
+            "body": "Test",
+        },
+    ).status_code == 302
+    assert sent["settings"]["security"] == "ssl"
+    assert sent["to"] == "recipient@example.invalid"

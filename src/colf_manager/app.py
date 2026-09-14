@@ -74,6 +74,7 @@ from .reporting import (
     combined_thirteenth_tfr_pdf,
 )
 from .storage import cleanup_orphan_files, safe_unlink, store_report
+from .mailer import send_smtp_message
 from .validation import (
     nonnegative_decimal,
     nonnegative_int,
@@ -101,6 +102,26 @@ def _bool_env(name, default=False):
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _setting(key, default=None):
+    row = db.session.get(Setting, key)
+    return row.value if row else default
+
+
+def _save_setting(key, value):
+    row = db.session.get(Setting, key)
+    if row is None:
+        row = Setting(key=key, value=str(value))
+        db.session.add(row)
+    else:
+        row.value = str(value)
+
+
+def _calendar_color(worker_id, employer_id, location_id):
+    token = f"{worker_id}:{employer_id or 0}:{location_id or 0}".encode()
+    hue = int(hashlib.sha256(token).hexdigest()[:6], 16) % 360
+    return f"hsl({hue} 52% 39%)"
 
 
 # Stable, application-specific PostgreSQL advisory lock key. The lock is
@@ -364,7 +385,7 @@ def create_app(test_config=None):
         response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         response.headers.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' https://images.unsplash.com data:; "
+            "default-src 'self'; img-src 'self' data:; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self'",
         )
@@ -735,32 +756,116 @@ def create_app(test_config=None):
         )
         return redirect(url_for("locations"))
 
-    @app.post("/rates")
+    @app.route("/rates", methods=["GET", "POST"])
     @login_required
     def rates():
-        try:
-            rate = HourlyRate(
-                worker_id=int(request.form["worker_id"]),
-                valid_from=parse_date(request.form["valid_from"], "Decorrenza"),
-                amount=nonnegative_decimal(request.form["amount"], "Tariffa"),
-                notes=request.form.get("notes") or None,
-            )
-            db.session.add(rate)
-            db.session.commit()
-            audit("rate_created", "hourly_rate", rate.id)
-            flash("Tariffa aggiornata", "success")
-        except (ValueError, IntegrityError) as exc:
-            db.session.rollback()
-            flash(str(exc) if isinstance(exc, ValueError) else "Esiste già una tariffa con questa decorrenza", "error")
-        return redirect(url_for("workers"))
+        if request.method == "POST":
+            try:
+                rate = HourlyRate(
+                    worker_id=int(request.form["worker_id"]),
+                    valid_from=parse_date(request.form["valid_from"], "Decorrenza"),
+                    amount=nonnegative_decimal(request.form["amount"], "Tariffa"),
+                    notes=request.form.get("notes") or None,
+                )
+                db.session.add(rate)
+                db.session.commit()
+                audit("rate_created", "hourly_rate", rate.id)
+                flash("Tariffa registrata", "success")
+                return redirect(url_for("rates"))
+            except (ValueError, IntegrityError) as exc:
+                db.session.rollback()
+                message = (
+                    str(exc)
+                    if isinstance(exc, ValueError)
+                    else "Esiste già una tariffa con questa decorrenza"
+                )
+                flash(message, "error")
+                return redirect(url_for("rates"))
+        return render_template(
+            "rates.html",
+            workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+            rates=HourlyRate.query.order_by(HourlyRate.valid_from.desc()).all(),
+        )
+
+    @app.route("/rates/<int:rate_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def rate_edit(rate_id):
+        rate = db.get_or_404(HourlyRate, rate_id)
+        if request.method == "POST":
+            try:
+                rate.worker_id = int(request.form["worker_id"])
+                rate.valid_from = parse_date(request.form["valid_from"], "Decorrenza")
+                rate.amount = nonnegative_decimal(request.form["amount"], "Tariffa")
+                rate.notes = request.form.get("notes") or None
+                db.session.commit()
+                audit("rate_updated", "hourly_rate", rate.id)
+                flash("Tariffa aggiornata", "success")
+                return redirect(url_for("rates"))
+            except (ValueError, IntegrityError) as exc:
+                db.session.rollback()
+                flash(str(exc) if isinstance(exc, ValueError) else "Decorrenza già presente", "error")
+        return render_template(
+            "rate_edit.html",
+            rate=rate,
+            workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+        )
+
+    @app.post("/rates/<int:rate_id>/delete")
+    @login_required
+    def rate_delete(rate_id):
+        rate = db.get_or_404(HourlyRate, rate_id)
+        db.session.delete(rate)
+        db.session.commit()
+        audit("rate_deleted", "hourly_rate", rate_id)
+        flash("Tariffa eliminata", "success")
+        return redirect(url_for("rates"))
 
     @app.route("/calendar")
     @login_required
     def calendar():
+        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
+        locations = Location.query.order_by(Location.name).all()
+        try:
+            recent_limit = max(1, min(50, int(_setting("calendar_recent_limit", "10"))))
+        except ValueError:
+            recent_limit = 10
+        seen = set()
+        recent_patterns = []
+        for entry in WorkEntry.query.order_by(WorkEntry.work_date.desc(), WorkEntry.start_time.desc()).limit(250).all():
+            worker = db.session.get(Worker, entry.worker_id)
+            if not worker:
+                continue
+            employer = db.session.get(Employer, worker.employer_id) if worker.employer_id else None
+            location_obj = db.session.get(Location, entry.location_id) if entry.location_id else None
+            if location_obj is None:
+                continue
+            key = (entry.worker_id, worker.employer_id, entry.location_id, entry.start_time, entry.end_time, entry.break_minutes)
+            if key in seen:
+                continue
+            seen.add(key)
+            start_minutes = entry.start_time.hour * 60 + entry.start_time.minute
+            end_minutes = entry.end_time.hour * 60 + entry.end_time.minute
+            duration_minutes = max(1, end_minutes - start_minutes)
+            recent_patterns.append({
+                "worker_id": worker.id,
+                "worker_name": f"{worker.first_name} {worker.last_name}",
+                "employer_name": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
+                "location_id": entry.location_id,
+                "location_name": location_obj.name + (f" — {location_obj.address}" if location_obj.address else ""),
+                "start_time": entry.start_time.strftime("%H:%M"),
+                "end_time": entry.end_time.strftime("%H:%M"),
+                "duration_minutes": duration_minutes,
+                "break_minutes": entry.break_minutes,
+                "color": _calendar_color(worker.id, worker.employer_id, entry.location_id),
+            })
+            if len(recent_patterns) >= recent_limit:
+                break
         return render_template(
             "calendar.html",
-            workers=Worker.query.order_by(Worker.last_name).all(),
-            locations=Location.query.order_by(Location.name).all(),
+            workers=workers,
+            locations=locations,
+            recent_patterns=recent_patterns,
+            recent_limit=recent_limit,
         )
 
     @app.get("/api/events")
@@ -770,32 +875,44 @@ def create_app(test_config=None):
         q = WorkEntry.query
         if worker_id:
             q = q.filter_by(worker_id=worker_id)
-        result = [
-            {
-                "id": f"work-{e.id}",
-                "title": f"{e.location} · {e.hours.quantize(Decimal('0.01'))}h",
-                "start": f"{e.work_date}T{e.start_time}",
-                "end": f"{e.work_date}T{e.end_time}",
-                "backgroundColor": "#287d70",
-                "extendedProps": {"type": "work", "location": e.location},
-            }
-            for e in q.all()
-        ]
+        result = []
+        for entry in q.order_by(WorkEntry.work_date, WorkEntry.start_time).all():
+            worker = db.session.get(Worker, entry.worker_id)
+            employer = db.session.get(Employer, worker.employer_id) if worker and worker.employer_id else None
+            color = _calendar_color(entry.worker_id, worker.employer_id if worker else None, entry.location_id)
+            result.append({
+                "id": f"work-{entry.id}",
+                "title": f"{worker.first_name if worker else ''} · {entry.location}",
+                "start": f"{entry.work_date}T{entry.start_time}",
+                "end": f"{entry.work_date}T{entry.end_time}",
+                "backgroundColor": color,
+                "borderColor": color,
+                "textColor": "#ffffff",
+                "extendedProps": {
+                    "type": "work",
+                    "worker_id": entry.worker_id,
+                    "worker": f"{worker.first_name} {worker.last_name}" if worker else "",
+                    "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
+                    "location_id": entry.location_id,
+                    "location": entry.location,
+                    "break_minutes": entry.break_minutes,
+                    "notes": entry.notes or "",
+                },
+            })
         aq = Absence.query
         if worker_id:
             aq = aq.filter_by(worker_id=worker_id)
-        colors = {"vacation": "#dfa63d", "sickness": "#d7675f", "unpaid_leave": "#78868a"}
-        result += [
-            {
-                "id": f"absence-{a.id}",
-                "title": a.kind.replace("_", " "),
-                "start": str(a.start_date),
-                "end": str(a.end_date),
+        colors = {"vacation": "#c58a24", "sickness": "#b94e48", "unpaid_leave": "#68777b"}
+        for absence in aq.all():
+            result.append({
+                "id": f"absence-{absence.id}",
+                "title": absence.kind.replace("_", " "),
+                "start": str(absence.start_date),
+                "end": str(absence.end_date),
                 "allDay": True,
-                "backgroundColor": colors.get(a.kind),
-            }
-            for a in aq.all()
-        ]
+                "backgroundColor": colors.get(absence.kind),
+                "extendedProps": {"type": "absence"},
+            })
         return jsonify(result)
 
     @app.post("/api/work")
@@ -843,20 +960,50 @@ def create_app(test_config=None):
     @app.patch("/api/work/<int:entry_id>")
     @login_required
     def move_work(entry_id):
-        e = db.get_or_404(WorkEntry, entry_id)
+        entry = db.get_or_404(WorkEntry, entry_id)
         payload = request.get_json(silent=True) or {}
         try:
-            work_date = parse_date(payload.get("work_date", str(e.work_date)), "Data")
-            start_time = parse_time(payload["start_time"], "Inizio") if payload.get("start_time") else e.start_time
-            end_time = parse_time(payload["end_time"], "Fine") if payload.get("end_time") else e.end_time
-            validate_work_times(start_time, end_time, e.break_minutes)
-            e.work_date, e.start_time, e.end_time = work_date, start_time, end_time
+            work_date = parse_date(payload.get("work_date", str(entry.work_date)), "Data")
+            start_time = parse_time(payload["start_time"], "Inizio") if payload.get("start_time") else entry.start_time
+            end_time = parse_time(payload["end_time"], "Fine") if payload.get("end_time") else entry.end_time
+            break_minutes = nonnegative_int(payload.get("break_minutes", entry.break_minutes), "Pausa")
+            validate_work_times(start_time, end_time, break_minutes)
+            worker_id = int(payload.get("worker_id", entry.worker_id))
+            if db.session.get(Worker, worker_id) is None:
+                raise ValueError("Lavoratore non valido")
+            location_id = payload.get("location_id", entry.location_id)
+            if location_id in (None, ""):
+                location = None
+                location_snapshot = str(payload.get("location") or entry.location).strip()
+            else:
+                location = db.session.get(Location, int(location_id))
+                if location is None:
+                    raise ValueError("Luogo non valido")
+                location_snapshot = location.name + (f" — {location.address}" if location.address else "")
+            entry.worker_id = worker_id
+            entry.location_id = location.id if location else None
+            entry.location = location_snapshot[:255]
+            entry.work_date = work_date
+            entry.start_time = start_time
+            entry.end_time = end_time
+            entry.break_minutes = break_minutes
+            if "notes" in payload:
+                entry.notes = (payload.get("notes") or "").strip() or None
             db.session.commit()
-            audit("work_moved", "work_entry", e.id)
+            audit("work_updated", "work_entry", entry.id)
             return {"ok": True}
-        except ValueError as exc:
+        except (ValueError, TypeError) as exc:
             db.session.rollback()
             return jsonify({"error": str(exc)}), 400
+
+    @app.delete("/api/work/<int:entry_id>")
+    @login_required
+    def delete_work(entry_id):
+        entry = db.get_or_404(WorkEntry, entry_id)
+        db.session.delete(entry)
+        db.session.commit()
+        audit("work_deleted", "work_entry", entry_id)
+        return {"ok": True}
 
     @app.post("/absences")
     @login_required
@@ -906,6 +1053,7 @@ def create_app(test_config=None):
                     description=request.form["description"].strip()[:255],
                     amount=nonnegative_decimal(request.form["amount"], "Importo"),
                     direction=direction,
+                    reimbursed="reimbursed" in request.form,
                 )
                 db.session.add(expense)
                 db.session.commit()
@@ -917,9 +1065,47 @@ def create_app(test_config=None):
                 flash(str(exc), "error")
         return render_template(
             "expenses.html",
-            workers=Worker.query.all(),
-            expenses=Expense.query.order_by(Expense.expense_date.desc()).all(),
+            workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+            expenses=Expense.query.order_by(Expense.expense_date.desc(), Expense.id.desc()).all(),
         )
+
+    @app.route("/expenses/<int:expense_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def expense_edit(expense_id):
+        expense = db.get_or_404(Expense, expense_id)
+        if request.method == "POST":
+            try:
+                direction = request.form["direction"]
+                if direction not in {"employer_advance", "worker_advance"}:
+                    raise ValueError("Direzione non valida")
+                expense.worker_id = int(request.form["worker_id"])
+                expense.expense_date = parse_date(request.form["expense_date"], "Data")
+                expense.description = request.form["description"].strip()[:255]
+                expense.amount = nonnegative_decimal(request.form["amount"], "Importo")
+                expense.direction = direction
+                expense.reimbursed = "reimbursed" in request.form
+                db.session.commit()
+                audit("expense_updated", "expense", expense.id)
+                flash("Spesa aggiornata", "success")
+                return redirect(url_for("expenses"))
+            except ValueError as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+        return render_template(
+            "expense_edit.html",
+            expense=expense,
+            workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+        )
+
+    @app.post("/expenses/<int:expense_id>/delete")
+    @login_required
+    def expense_delete(expense_id):
+        expense = db.get_or_404(Expense, expense_id)
+        db.session.delete(expense)
+        db.session.commit()
+        audit("expense_deleted", "expense", expense_id)
+        flash("Spesa eliminata", "success")
+        return redirect(url_for("expenses"))
 
     @app.route("/documents", methods=["GET", "POST"])
     @login_required
@@ -1021,9 +1207,25 @@ def create_app(test_config=None):
     def _employer_for(worker):
         return db.session.get(Employer, worker.employer_id) if worker.employer_id else None
 
+
+    def _report_approval(worker, default_mode="both"):
+        employer = _employer_for(worker)
+        mode = (request.args.get("approval") or default_mode).strip().lower()
+        if mode not in {"none", "worker", "employer", "both"}:
+            mode = default_mode
+        place = (request.args.get("signature_place") or "").strip()
+        if not place and employer and employer.address:
+            place = employer.address
+        report_date = request.args.get("report_date") or date.today().isoformat()
+        try:
+            parsed_date = date.fromisoformat(report_date)
+        except ValueError:
+            parsed_date = date.today()
+        return {"mode": mode, "place": place, "date": parsed_date}
+
     def _rule_notes(year):
         verified = year in {2025, 2026}
-        prefix = f"Regole {year} verificate nel pacchetto r19 su fonti ufficiali INPS/Agenzia delle Entrate." if verified else f"Formula generale applicata per {year}; verificare eventuali variazioni annuali su INPS, Ministero del Lavoro e Agenzia delle Entrate prima dell'uso ufficiale."
+        prefix = f"Regole {year} verificate su fonti ufficiali INPS/Agenzia delle Entrate." if verified else f"Formula generale applicata per {year}; verificare eventuali variazioni annuali su INPS, Ministero del Lavoro e Agenzia delle Entrate prima dell'uso ufficiale."
         return [prefix, "Ferie: 26 giorni lavorativi annui; per servizio inferiore all'anno maturano in dodicesimi e la frazione di mese pari o superiore a 15 giorni vale come mese intero (fonte: INPS, Calcolare contributi, tredicesima e ferie per i lavoratori domestici).", "TFR (rapporti dal 1990): quota dell'anno = retribuzione utile / 13,5. La quota dell'anno corrente non è rivalutata (fonte: INPS, Dimissioni, licenziamento e TFR dei lavoratori domestici; art. 2120 c.c.).", "Quote TFR di anni precedenti: rivalutazione legale 1,5% + 75% dell'incremento dell'indice FOI ISTAT dicembre/dicembre.", "Tredicesima: un dodicesimo della retribuzione annua; nel prospetto viene inclusa come quota maturata stimata nella base utile TFR (fonte: INPS).", "CU di cortesia: il PDF è una certificazione del datore privato non sostituto d'imposta e non il modello CU telematico (fonte: Agenzia delle Entrate, istruzioni dichiarazione precompilata)."]
 
     def _fiscal_data(worker, summary, year):
@@ -1067,6 +1269,9 @@ def create_app(test_config=None):
                 _, annual, vacation = get_annual(worker_id, year)
         except ValueError as exc:
             flash(str(exc), "error")
+        selected = db.session.get(Worker, worker_id) if worker_id else None
+        selected_employer = _employer_for(selected) if selected else None
+        default_place = selected_employer.address if selected_employer and selected_employer.address else ""
         return render_template(
             "reports.html",
             workers=Worker.query.order_by(Worker.last_name).all(),
@@ -1076,6 +1281,9 @@ def create_app(test_config=None):
             selected_worker=worker_id,
             year=year,
             month=month,
+            approval=request.args.get("approval", "both"),
+            signature_place=request.args.get("signature_place", default_place),
+            report_date=request.args.get("report_date", today.isoformat()),
             archived_reports=GeneratedReport.query.order_by(GeneratedReport.created_at.desc()).limit(100).all(),
         )
 
@@ -1087,14 +1295,14 @@ def create_app(test_config=None):
         month = request.args.get("month", type=int)
         if None in {worker_id, year, month}:
             abort(400)
-        worker, _, absences_list, _, _ = _worker_data(worker_id)
+        worker, _, absences_list, expenses_list, _ = _worker_data(worker_id)
         try:
             summary = get_summary(worker_id, year, month)
         except ValueError:
             abort(400)
         vacation=vacation_balance(worker,absences_list,year,min(date.today(),date(year,12,31)))
         audit("payroll_downloaded","worker",worker_id,f"{year}-{month:02d}")
-        return _archive_pdf(worker, "monthly_payroll", f"cedolino-{year}-{month:02d}.pdf", payroll_pdf(worker,summary,year,month,_employer_for(worker),vacation,_fiscal_data(worker, summary, year)), date(year, month, 1), date(year, month, monthrange(year, month)[1]))
+        return _archive_pdf(worker, "monthly_payroll", f"cedolino-{year}-{month:02d}.pdf", payroll_pdf(worker,summary,year,month,_employer_for(worker),vacation,_fiscal_data(worker, summary, year),[x for x in expenses_list if x.expense_date.year == year and x.expense_date.month == month], approval=_report_approval(worker, "both")), date(year, month, 1), date(year, month, monthrange(year, month)[1]))
 
     @app.get("/reports/annual-payroll.pdf")
     @login_required
@@ -1105,7 +1313,7 @@ def create_app(test_config=None):
             abort(400)
         worker,annual,vacation=get_annual(worker_id,year)
         audit("annual_payroll_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "annual_payroll", f"cedolino-annuale-{year}.pdf", annual_payroll_pdf(worker,_employer_for(worker),annual,year,vacation,_fiscal_data(worker, annual, year)), date(year, 1, 1), date(year, 12, 31))
+        return _archive_pdf(worker, "annual_payroll", f"cedolino-annuale-{year}.pdf", annual_payroll_pdf(worker,_employer_for(worker),annual,year,vacation,_fiscal_data(worker, annual, year),Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= date(year,1,1), Expense.expense_date <= date(year,12,31)).order_by(Expense.expense_date).all(), approval=_report_approval(worker, "both")), date(year, 1, 1), date(year, 12, 31))
 
     @app.get("/reports/cu-courtesy.pdf")
     @login_required
@@ -1116,7 +1324,7 @@ def create_app(test_config=None):
             abort(400)
         worker,annual,_=get_annual(worker_id,year)
         audit("courtesy_cu_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "courtesy_cu", f"cu-cortesia-{year}.pdf", courtesy_cu_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year)), date(year, 1, 1), date(year, 12, 31))
+        return _archive_pdf(worker, "courtesy_cu", f"cu-cortesia-{year}.pdf", courtesy_cu_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year), approval=_report_approval(worker, "employer")), date(year, 1, 1), date(year, 12, 31))
 
     @app.get("/reports/tfr.pdf")
     @login_required
@@ -1130,7 +1338,7 @@ def create_app(test_config=None):
         cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
         tfr=tfr_year_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff,_tfr_factor())
         audit("tfr_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "tfr", f"tfr-{year}.pdf", tfr_annual_pdf(worker,_employer_for(worker),tfr,year,_rule_notes(year),_fiscal_data(worker, tfr, year)), date(year, 1, 1), cutoff)
+        return _archive_pdf(worker, "tfr", f"tfr-{year}.pdf", tfr_annual_pdf(worker,_employer_for(worker),tfr,year,_rule_notes(year),_fiscal_data(worker, tfr, year), approval=_report_approval(worker, "both")), date(year, 1, 1), cutoff)
 
     @app.get("/reports/thirteenth.pdf")
     @login_required
@@ -1145,7 +1353,7 @@ def create_app(test_config=None):
         th=thirteenth_year_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff)
         annual=annual_summary([e for e in entries if e.work_date <= cutoff],[a for a in absences_list if a.start_date <= cutoff],[x for x in expenses_list if x.expense_date <= cutoff],rates_list,year,_tfr_factor())
         audit("thirteenth_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "thirteenth", f"tredicesima-{year}.pdf", thirteenth_payroll_pdf(worker,_employer_for(worker),th,year,_rule_notes(year),_fiscal_data(worker, annual, year)), date(year, 1, 1), cutoff)
+        return _archive_pdf(worker, "thirteenth", f"tredicesima-{year}.pdf", thirteenth_payroll_pdf(worker,_employer_for(worker),th,year,_rule_notes(year),_fiscal_data(worker, annual, year), approval=_report_approval(worker, "both")), date(year, 1, 1), cutoff)
 
     @app.get("/reports/thirteenth-tfr.pdf")
     @login_required
@@ -1159,7 +1367,7 @@ def create_app(test_config=None):
         cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
         combined=combined_thirteenth_tfr_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff,_tfr_factor())
         audit("thirteenth_tfr_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "thirteenth_tfr", f"tredicesima-tfr-{year}.pdf", combined_thirteenth_tfr_pdf(worker,_employer_for(worker),combined,year,_rule_notes(year)), date(year, 1, 1), cutoff)
+        return _archive_pdf(worker, "thirteenth_tfr", f"tredicesima-tfr-{year}.pdf", combined_thirteenth_tfr_pdf(worker,_employer_for(worker),combined,year,_rule_notes(year), approval=_report_approval(worker, "both")), date(year, 1, 1), cutoff)
 
     @app.get("/reports/trend.pdf")
     @login_required
@@ -1170,7 +1378,7 @@ def create_app(test_config=None):
             abort(400)
         worker,annual,_=get_annual(worker_id,year)
         audit("trend_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "trend", f"andamento-{year}.pdf", trend_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year)), date(year, 1, 1), date(year, 12, 31))
+        return _archive_pdf(worker, "trend", f"andamento-{year}.pdf", trend_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year),Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= date(year,1,1), Expense.expense_date <= date(year,12,31)).order_by(Expense.expense_date).all(), approval=_report_approval(worker, "none")), date(year, 1, 1), date(year, 12, 31))
 
     @app.get("/reports/archive/<int:report_id>")
     @login_required
@@ -1195,6 +1403,103 @@ def create_app(test_config=None):
         audit("report_deleted", "generated_report", report_id)
         flash("Report eliminato", "success")
         return redirect(url_for("reports"))
+
+    @app.route("/settings", methods=["GET", "POST"])
+    @admin_required
+    def settings():
+        keys = [
+            "calendar_recent_limit", "smtp_host", "smtp_port", "smtp_security",
+            "smtp_username", "smtp_password", "smtp_from_email", "smtp_from_name",
+            "auth_methods",
+        ]
+        if request.method == "POST":
+            try:
+                recent_limit = max(1, min(50, int(request.form.get("calendar_recent_limit", "10"))))
+                _save_setting("calendar_recent_limit", recent_limit)
+                _save_setting("smtp_host", request.form.get("smtp_host", "").strip())
+                _save_setting("smtp_port", int(request.form.get("smtp_port", "587") or 587))
+                security = request.form.get("smtp_security", "starttls")
+                if security not in {"none", "starttls", "ssl"}:
+                    raise ValueError("Sicurezza SMTP non valida")
+                _save_setting("smtp_security", security)
+                _save_setting("smtp_username", request.form.get("smtp_username", "").strip())
+                if request.form.get("smtp_password"):
+                    _save_setting("smtp_password", request.form.get("smtp_password"))
+                _save_setting("smtp_from_email", request.form.get("smtp_from_email", "").strip())
+                _save_setting("smtp_from_name", request.form.get("smtp_from_name", "colf-manager").strip())
+                _save_setting("auth_methods", "local")
+                db.session.commit()
+                audit("settings_updated", "setting")
+                flash("Impostazioni salvate", "success")
+                return redirect(url_for("settings"))
+            except (ValueError, TypeError) as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+        values = {key: _setting(key, "") for key in keys}
+        values["calendar_recent_limit"] = values["calendar_recent_limit"] or "10"
+        values["smtp_port"] = values["smtp_port"] or "587"
+        values["smtp_security"] = values["smtp_security"] or "starttls"
+        values["smtp_from_name"] = values["smtp_from_name"] or "colf-manager"
+        values["auth_methods"] = "local"
+        values["smtp_password_configured"] = bool(values.get("smtp_password"))
+        values.pop("smtp_password", None)
+        return render_template("settings.html", settings=values)
+
+    def _smtp_settings():
+        return {
+            "host": _setting("smtp_host", ""),
+            "port": int(_setting("smtp_port", "587") or 587),
+            "security": _setting("smtp_security", "starttls"),
+            "username": _setting("smtp_username", ""),
+            "password": _setting("smtp_password", ""),
+            "from_email": _setting("smtp_from_email", ""),
+            "from_name": _setting("smtp_from_name", "colf-manager"),
+        }
+
+    @app.route("/mail/compose", methods=["GET", "POST"])
+    @login_required
+    def mail_compose():
+        artifact_type = request.values.get("artifact_type", "notification")
+        artifact_id = request.values.get("artifact_id", type=int)
+        attachment = None
+        default_to = ""
+        default_subject = "Comunicazione colf-manager"
+        if artifact_type == "report" and artifact_id:
+            report = db.get_or_404(GeneratedReport, artifact_id)
+            attachment = (Path(app.config["REPORT_FOLDER"]) / report.stored_name, report.filename, report.mime_type)
+            worker = db.session.get(Worker, report.worker_id) if report.worker_id else None
+            default_to = worker.email if worker and worker.email else ""
+            default_subject = f"Report {report.report_type} - {report.filename}"
+        elif artifact_type == "document" and artifact_id:
+            document = db.get_or_404(Document, artifact_id)
+            attachment = (Path(app.config["DOCUMENT_FOLDER"]) / document.stored_name, document.filename, document.mime_type or "application/octet-stream")
+            worker = db.session.get(Worker, document.worker_id)
+            default_to = worker.email if worker and worker.email else ""
+            default_subject = f"Documento - {document.filename}"
+        if request.method == "POST":
+            try:
+                to_address = request.form.get("to", "").strip()
+                subject = request.form.get("subject", "").strip()
+                body = request.form.get("body", "").strip()
+                attachments = []
+                if attachment:
+                    if not attachment[0].is_file():
+                        raise ValueError("Allegato non disponibile")
+                    attachments.append((attachment[1], attachment[2], attachment[0].read_bytes()))
+                send_smtp_message(_smtp_settings(), to_address, subject, body, attachments)
+                audit("email_sent", artifact_type, artifact_id, details=f"to={to_address}")
+                flash("Messaggio inviato", "success")
+                return redirect(url_for("reports") if artifact_type == "report" else url_for("documents") if artifact_type == "document" else url_for("dashboard"))
+            except (ValueError, OSError) as exc:
+                flash(f"Invio non riuscito: {exc}", "error")
+        return render_template(
+            "mail_compose.html",
+            artifact_type=artifact_type,
+            artifact_id=artifact_id,
+            attachment_name=attachment[1] if attachment else None,
+            default_to=default_to,
+            default_subject=default_subject,
+        )
 
     @app.route("/admin/archive", methods=["GET", "POST"])
     @admin_required

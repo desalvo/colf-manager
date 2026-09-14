@@ -1,1 +1,58 @@
-{% extends 'base.html' %}{% block head %}<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.css" rel="stylesheet">{% endblock %}{% block content %}<div class="page-title"><span class="eyebrow">Trascina, pianifica, controlla</span><h1>Calendario delle ore</h1><p>Ore, ferie, malattia e permessi in un'unica vista.</p><div class="hero-actions"><a class="button secondary light" href="/">← Menu principale</a></div></div><div class="calendar-layout"><section class="card"><div class="toolbar"><select id="workerFilter"><option value="">Tutti i lavoratori</option>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select><button onclick="openModal()">+ Registra ore</button></div><div id="calendar"></div></section><aside class="side-card"><h3>Assenza</h3><form method="post" action="/absences"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Lavoratore<select name="worker_id">{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label><label>Tipo<select name="kind"><option value="vacation">Ferie</option><option value="sickness">Malattia</option><option value="unpaid_leave">Permesso non retribuito</option></select></label><label>Dal<input type="date" name="start_date" required></label><label>Al<input type="date" name="end_date" required></label><label class="check"><input type="checkbox" name="paid"> Retribuita</label><label>Ore pagate totali <small>(lascia vuoto per calcolo automatico ferie)</small><input type="number" min="0" step=".01" name="paid_hours"></label><button>Registra</button></form></aside></div><dialog id="workDialog"><form id="workForm"><button type="button" class="close" onclick="workDialog.close()">×</button><h2>Registra ore</h2><label>Lavoratore<select name="worker_id" required>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label><label>Data<input type="date" name="work_date" required></label><div class="formgrid"><label>Inizio<input type="time" name="start_time" required value="09:00"></label><label>Fine<input type="time" name="end_time" required value="13:00"></label></div><label>Luogo<select name="location_id" required><option value="">Seleziona un luogo</option>{% for location in locations %}<option value="{{location.id}}">{{location.name}}{% if location.address %} — {{location.address}}{% endif %}</option>{% endfor %}</select></label><p class="fineprint">{% if locations %}Gestisci l’anagrafica da <a href="/locations">Luoghi</a>.{% else %}<b>Nessun luogo registrato.</b> <a href="/locations">Aggiungi il primo luogo</a> prima di registrare le ore.{% endif %}</p><label>Pausa (minuti)<input type="number" min="0" name="break_minutes" value="0"></label><button>Salva nel calendario</button></form></dialog>{% endblock %}{% block scripts %}<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.js"></script><script src="{{url_for('static',filename='calendar.js')}}"></script>{% endblock %}
+{% extends 'base.html' %}
+{% block head %}<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.css" rel="stylesheet">{% endblock %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Agenda interattiva</span><h1>Calendario delle ore</h1><p>Blocchi proporzionali alla durata, colori per lavoratore/datore/luogo e inserimento rapido drag &amp; drop.</p></div>
+<div class="calendar-shell">
+  <section class="card calendar-card">
+    <div class="toolbar calendar-toolbar">
+      <label class="compact-field">Lavoratore<select id="workerFilter"><option value="">Tutti i lavoratori</option>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
+      <button type="button" onclick="openWorkModal()">+ Registra ore</button>
+    </div>
+    <div id="calendar"></div>
+  </section>
+  <aside class="calendar-rail">
+    <section class="side-card quick-entry-panel">
+      <div class="card-title"><div><span class="eyebrow">Drag &amp; drop</span><h3>Inserimenti recenti</h3></div><span class="badge">{{recent_limit}}</span></div>
+      <p class="fineprint">Trascina una scheda sul giorno e sull'orario desiderato. L'orario di arrivo viene usato come nuovo inizio mantenendo la stessa durata.</p>
+      <div id="recentPatterns" class="recent-patterns">
+      {% for p in recent_patterns %}
+        <article class="quick-pattern" draggable="true" style="--event-color:{{p.color}}"
+          data-worker-id="{{p.worker_id}}" data-location-id="{{p.location_id or ''}}" data-start="{{p.start_time}}" data-end="{{p.end_time}}" data-duration="{{p.duration_minutes}}" data-break="{{p.break_minutes}}">
+          <div class="pattern-time"><b>{{p.start_time}}–{{p.end_time}}</b><span>{{p.duration_minutes}} min</span></div>
+          <strong>{{p.worker_name}}</strong><small>{{p.employer_name}}</small><small>{{p.location_name}}</small>
+        </article>
+      {% else %}<p class="fineprint">Le combinazioni usate più di recente appariranno qui.</p>{% endfor %}
+      </div>
+      <a class="text-link" href="/settings">⚙ Configura il numero di inserimenti rapidi</a>
+    </section>
+    <section class="side-card">
+      <h3>Registra assenza</h3>
+      <form method="post" action="/absences">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>Lavoratore<select name="worker_id">{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
+        <label>Tipo<select name="kind"><option value="vacation">Ferie</option><option value="sickness">Malattia</option><option value="unpaid_leave">Permesso non retribuito</option></select></label>
+        <label>Dal<input type="date" name="start_date" required></label><label>Al<input type="date" name="end_date" required></label>
+        <label class="check"><input type="checkbox" name="paid"> Retribuita</label>
+        <label>Ore pagate totali<small>Vuoto = calcolo automatico ferie</small><input type="number" min="0" step=".01" name="paid_hours"></label>
+        <button>Registra assenza</button>
+      </form>
+    </section>
+  </aside>
+</div>
+
+<dialog id="workDialog" class="work-dialog">
+  <form id="workForm">
+    <button type="button" class="close" onclick="workDialog.close()" aria-label="Chiudi">×</button>
+    <input type="hidden" name="entry_id">
+    <h2 id="workDialogTitle">Registra ore</h2>
+    <label>Lavoratore<select name="worker_id" required>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
+    <label>Data<input type="date" name="work_date" required></label>
+    <div class="formgrid"><label>Inizio<input type="time" name="start_time" required value="09:00"></label><label>Fine<input type="time" name="end_time" required value="13:00"></label></div>
+    <label>Luogo<select name="location_id" required><option value="">Seleziona un luogo</option>{% for location in locations %}<option value="{{location.id}}">{{location.name}}{% if location.address %} — {{location.address}}{% endif %}</option>{% endfor %}</select></label>
+    <label>Pausa (minuti)<input type="number" min="0" name="break_minutes" value="0"></label>
+    <label>Note<textarea name="notes" rows="3"></textarea></label>
+    <div class="dialog-actions"><button id="saveWorkButton">Salva</button><button type="button" id="deleteWorkButton" class="danger hidden">Elimina registrazione</button></div>
+  </form>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.js"></script><script src="{{url_for('static',filename='calendar.js')}}"></script>{% endblock %}

@@ -105,3 +105,20 @@
 - No functional behavior change from r21.
 - Build and verification markers updated to r23-full.
 
+
+## r24-full - 2026-09-14
+
+- Fix Kubernetes PostgreSQL startup on restricted security contexts.
+- Run `postgres:17-alpine` explicitly as UID/GID 70 and set `fsGroup: 70`.
+- Add `fsGroupChangePolicy: OnRootMismatch` for the PostgreSQL PVC.
+- Mount `/var/run/postgresql` from an `emptyDir` so the non-root process can create its Unix socket.
+- Keep `allowPrivilegeEscalation: false` and drop all Linux capabilities.
+- No PostgreSQL PVC deletion is required for this permission-only fix.
+
+## r25-full - 2026-09-14
+
+- Upgrade the bundled PostgreSQL runtime from 17 to the latest stable PostgreSQL 18.6 release.
+- Pin database and backup images to `postgres:18.6-alpine`.
+- Adopt the PostgreSQL 18 official-image storage layout by mounting the persistent volume at `/var/lib/postgresql`.
+- Keep the Alpine `postgres` UID/GID 70 security context for the database and backup workloads.
+- Add explicit PostgreSQL 17 → 18 major-upgrade guidance for existing Docker/Podman and Kubernetes installations.

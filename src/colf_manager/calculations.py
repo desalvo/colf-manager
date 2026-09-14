@@ -179,12 +179,12 @@ def period_bounds(year, month):
 INPS_TABLES = {
     2025: {
         "bands": [(Decimal("9.48"), Decimal("1.68"), Decimal("0.42")), (Decimal("11.54"), Decimal("1.89"), Decimal("0.48")), (None, Decimal("2.30"), Decimal("0.58"))],
-        "over24": (Decimal("1.22"), Decimal("0.31")),
+        "over25": (Decimal("1.22"), Decimal("0.31")),
         "source": "INPS 2025 - circolare n. 29/2025",
     },
     2026: {
         "bands": [(Decimal("9.61"), Decimal("1.70"), Decimal("0.43")), (Decimal("11.70"), Decimal("1.92"), Decimal("0.48")), (None, Decimal("2.34"), Decimal("0.59"))],
-        "over24": (Decimal("1.24"), Decimal("0.31")),
+        "over25": (Decimal("1.24"), Decimal("0.31")),
         "source": "INPS 2026 - circolare n. 9/2026",
     },
 }
@@ -210,7 +210,7 @@ def _inps_hourly_amount(year, effective_hourly, weekly_hours):
     if not table:
         return None
     if Decimal(weekly_hours or 0) > Decimal("24"):
-        total, worker = table["over24"]
+        total, worker = table["over25"]
         return total, worker, table["source"]
     for ceiling, total, worker in table["bands"]:
         if ceiling is None or effective_hourly <= ceiling:

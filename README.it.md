@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r23-full
+# colf-manager 1.0.0 · build r25-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -65,3 +65,7 @@ I luoghi di lavoro sono gestiti da un’anagrafica dedicata con aggiunta, visual
 I report PDF generati vengono conservati nell'applicazione sul volume persistente e possono essere riscaricati o cancellati manualmente. Anche i documenti caricati possono essere cancellati manualmente. Gli amministratori dispongono di un export ZIP completo di database, documenti referenziati e report archiviati e di un import completo con conferma esplicita. I file presenti sul volume ma non più referenziati dal database vengono eliminati automaticamente dal servizio di manutenzione dopo la retention configurata.
 
 La Panoramica può essere consultata scegliendo mese e anno. Il calendario consente di navigare nei mesi precedenti e registrare retroattivamente le ore nel periodo visualizzato.
+
+## PostgreSQL 18.6
+
+La r25 usa `postgres:18.6-alpine`. Le installazioni PostgreSQL 17 esistenti richiedono una migrazione major supportata; leggere `POSTGRESQL-18-UPGRADE.it.md` prima di modificare il workload database o il PVC.

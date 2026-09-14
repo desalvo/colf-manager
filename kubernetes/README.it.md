@@ -102,3 +102,16 @@ kubectl delete -f kubernetes/secret-database.yaml
 
 > `kubectl delete -k kubernetes` elimina intenzionalmente l'intero stack,
 > compresi tutti i PVC.
+
+## Security context PostgreSQL
+
+L'immagine `postgres:18.6-alpine` usa l'account Alpine `postgres` con UID/GID 70.
+Il Pod database viene quindi eseguito esplicitamente con UID/GID 70 e `fsGroup: 70`.
+`/var/run/postgresql` usa un volume `emptyDir`, così PostgreSQL non root può creare il
+socket Unix senza richiedere capability `chown`/`chmod`. Il container mantiene
+`allowPrivilegeEscalation: false` e continua a rimuovere tutte le capability Linux.
+
+Per una nuova installazione r25 questo security context è pronto per PostgreSQL 18.6.
+Se il PVC esistente contiene un cluster PostgreSQL 17, **non** applicare semplicemente il workload
+PostgreSQL 18 su quel PVC. Eseguire la migrazione major 17 → 18 descritta in
+`POSTGRESQL-18-UPGRADE.it.md`, preferibilmente ripristinando su un nuovo PVC PostgreSQL 18.

@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r23-full
+# colf-manager 1.0.0 · build r25-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -65,3 +65,7 @@ Work locations have dedicated create, view, edit and delete management. The cale
 Generated PDF reports are persisted on application storage and can be downloaded again or manually deleted. Uploaded documents can also be manually deleted. Administrators can create a complete ZIP export containing application database rows, referenced documents and archived reports, and can perform a confirmed full restore. Files present on storage but no longer referenced by the database are automatically removed by the maintenance service after the configured retention period.
 
 The Dashboard can be viewed for a selected month and year. The calendar supports navigation to prior months and retroactive work-entry creation in the displayed period.
+
+## PostgreSQL 18.6
+
+r25 uses `postgres:18.6-alpine`. Existing PostgreSQL 17 installations require a supported major-version migration; see `POSTGRESQL-18-UPGRADE.md` before changing the database workload or PVC.

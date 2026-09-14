@@ -14,7 +14,7 @@
   <aside class="calendar-rail">
     <section class="side-card quick-entry-panel">
       <div class="card-title"><div><span class="eyebrow">Drag &amp; drop</span><h3>Inserimenti recenti</h3></div><span class="badge">{{recent_limit}}</span></div>
-      <p class="fineprint">Trascina una scheda sul giorno e sull'orario desiderato. L'orario di arrivo diventa il nuovo inizio mantenendo la durata.</p>
+      <p class="fineprint">Trascina un elemento sul giorno desiderato: cambia solo la data, mentre tipo, orari, lavoratore, datore e luogo restano invariati.</p>
       <div id="recentPatterns" class="recent-patterns">
       {% for p in recent_patterns %}
         <article class="quick-pattern quick-pattern-pill" draggable="true" style="--event-color:{{p.color}}"
@@ -22,7 +22,7 @@
           title="{{p.kind_label}} · {{p.start_time}}–{{p.end_time}} · {{p.worker_name}} · {{p.employer_name}}{% if p.location_name and p.location_name != '—' %} · {{p.location_name}}{% endif %}" tabindex="0">
           <span class="pattern-kind">{{p.kind_label}}</span>
           <span class="pattern-time"><b>{{p.start_time}}–{{p.end_time}}</b></span>
-          <span class="pattern-meta">{{p.worker_name}} · {{p.employer_name}}{% if p.location_name and p.location_name != '—' %} · {{p.location_name}}{% endif %}</span>
+          <span class="pattern-place">{{p.location_name if p.location_name and p.location_name != '—' else '—'}}</span>
         </article>
       {% else %}<p class="fineprint">Le combinazioni usate più di recente appariranno qui.</p>{% endfor %}
       </div>

@@ -120,7 +120,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 @media(max-width:1100px){.dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:600px){.dashboard-stats{grid-template-columns:1fr;}}
 
-/* r40 calendar recent-pattern rail and consistent event colors */
+/* r41 calendar recent-pattern rail and consistent event colors */
 .calendar-shell{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:20px;align-items:start}
 .calendar-card{min-width:0}
 .calendar-rail{display:grid;gap:16px;position:sticky;top:94px;align-self:start}
@@ -134,3 +134,63 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 .fc-dayGridMonth-view .fc-event,.fc-dayGridMonth-view .fc-event-main{background-color:var(--fc-event-bg-color)!important;border-color:var(--fc-event-border-color)!important;color:#fff!important}
 @media(max-width:1100px){.calendar-shell{grid-template-columns:minmax(0,1fr) 285px}}
 @media(max-width:850px){.calendar-shell{grid-template-columns:1fr}.calendar-rail{position:static;grid-row:auto}.quick-entry-panel{order:-1}}
+
+
+/* r41 ultra-compact drag chips and always-visible calendar time ranges */
+.calendar-shell{grid-template-columns:minmax(0,1fr) 220px;gap:14px}
+.calendar-rail{min-width:0}
+.recent-patterns{justify-items:start;gap:7px}
+.quick-pattern-pill{
+  display:inline-flex;
+  width:max-content;
+  max-width:100%;
+  min-width:0;
+  align-items:center;
+  gap:5px;
+  padding:5px 8px;
+  border-width:1px;
+  border-radius:999px;
+  white-space:nowrap;
+}
+.quick-pattern-pill .pattern-kind{padding:2px 6px;font-size:9px;line-height:1.2}
+.quick-pattern-pill .pattern-time{font-size:10px;line-height:1.2;white-space:nowrap;flex:0 0 auto}
+.quick-pattern-pill .pattern-place{
+  min-width:0;
+  max-width:72px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--muted);
+  font-size:9.5px;
+  line-height:1.2;
+}
+.quick-pattern-pill .pattern-meta{display:none!important}
+.calendar-card{overflow-x:auto}
+#calendar{min-width:760px}
+.calendar-event-content .event-time{
+  display:block;
+  white-space:nowrap;
+  overflow:visible;
+  text-overflow:clip;
+  font-size:10px;
+  line-height:1.15;
+  letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+.fc-dayGridMonth-view .calendar-event-content.month-compact{
+  padding:2px 3px;
+  overflow:visible;
+  text-overflow:clip;
+  white-space:nowrap;
+}
+.fc-dayGridMonth-view .calendar-event-content.month-compact .event-time{font-size:9.5px;font-weight:900}
+.fc-timeGrid-view .calendar-event-content{padding:1px 2px;overflow:visible}
+.fc-timeGrid-view .calendar-event-content .event-time{font-size:9.5px}
+@media(max-width:1100px){.calendar-shell{grid-template-columns:minmax(0,1fr) 205px;gap:12px}.quick-pattern-pill .pattern-place{max-width:60px}}
+@media(max-width:850px){
+  .calendar-shell{grid-template-columns:1fr}
+  .calendar-rail{width:100%}
+  .recent-patterns{display:flex;flex-wrap:wrap;align-items:flex-start}
+  .quick-pattern-pill .pattern-place{max-width:90px}
+  #calendar{min-width:760px}
+}

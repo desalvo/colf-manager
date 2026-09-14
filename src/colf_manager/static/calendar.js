@@ -293,12 +293,13 @@ document.addEventListener('DOMContentLoaded', () => {
       wrap.className = isMonth ? 'calendar-event-content month-compact' : 'calendar-event-content';
       const start = arg.event.start ? timeString(arg.event.start) : '';
       const end = arg.event.end ? timeString(arg.event.end) : '';
+      const timeRange = end ? `${start}–${end}` : start;
       if (isMonth) {
-        wrap.textContent = end ? `${start}–${end}` : start;
+        wrap.innerHTML = `<b class="event-time">${timeRange}</b>`;
       } else if (props.type === 'work') {
-        wrap.innerHTML = `<b>${arg.timeText}</b><span>${props.worker}</span><small>${props.employer}</small><small>${props.location}</small>`;
+        wrap.innerHTML = `<b class="event-time">${timeRange}</b><span>${props.worker}</span><small>${props.employer}</small><small>${props.location}</small>`;
       } else {
-        wrap.innerHTML = `<b>${arg.timeText}</b><span>${props.kind_label}</span><small>${props.worker}</small><small>${props.employer}</small>`;
+        wrap.innerHTML = `<b class="event-time">${timeRange}</b><span>${props.kind_label}</span><small>${props.worker}</small><small>${props.employer}</small>`;
       }
       return {domNodes: [wrap]};
     },

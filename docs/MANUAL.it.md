@@ -97,7 +97,7 @@ I report possono includere una sezione di approvazione con firma del lavoratore,
 
 Dalla r37 la stessa finestra del calendario consente di scegliere **Ore retribuite**, **Ferie** o **Malattia**. Ferie e malattia sono registrate come intervalli orari e possono coesistere nello stesso giorno con ore retribuite. Per periodi di più giorni, la data iniziale e finale sono sempre comprese. Le ferie sono mostrate in colore dedicato, la malattia in un secondo colore dedicato; le ore retribuite mantengono un colore stabile determinato dalla combinazione datore/lavoratore/luogo. Cliccando un intervallo è possibile visualizzarlo, modificarlo o eliminarlo.
 
-## Novità r40: drag & drop e andamento ore per luogo
+## Novità r41: drag & drop e andamento ore per luogo
 
 Nel calendario gli inserimenti recenti sono disponibili in una colonna dedicata a destra sotto forma di elementi grafici trascinabili. Il rilascio su un nuovo giorno conserva tipo di registrazione, orari di inizio/fine, lavoratore, relazione con il datore, luogo e pausa; per ferie e malattia conserva anche lo stato retribuito e le ore pagate configurate. I colori degli eventi sono coerenti nelle viste mese, settimana e giorno.
 

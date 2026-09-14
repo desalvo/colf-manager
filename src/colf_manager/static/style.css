@@ -136,33 +136,37 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 @media(max-width:850px){.calendar-shell{grid-template-columns:1fr}.calendar-rail{position:static;grid-row:auto}.quick-entry-panel{order:-1}}
 
 
-/* r41 ultra-compact drag chips and always-visible calendar time ranges */
-.calendar-shell{grid-template-columns:minmax(0,1fr) 220px;gap:14px}
+/* r42 three-line ultra-compact drag chips and always-visible calendar time ranges */
+.calendar-shell{grid-template-columns:minmax(0,1fr) 170px;gap:12px}
 .calendar-rail{min-width:0}
 .recent-patterns{justify-items:start;gap:7px}
 .quick-pattern-pill{
-  display:inline-flex;
+  display:grid;
+  grid-template-columns:minmax(0,max-content);
+  grid-template-rows:auto auto auto;
   width:max-content;
   max-width:100%;
   min-width:0;
-  align-items:center;
-  gap:5px;
-  padding:5px 8px;
+  justify-items:start;
+  align-items:start;
+  gap:2px;
+  padding:6px 9px;
   border-width:1px;
-  border-radius:999px;
+  border-radius:18px;
   white-space:nowrap;
 }
-.quick-pattern-pill .pattern-kind{padding:2px 6px;font-size:9px;line-height:1.2}
-.quick-pattern-pill .pattern-time{font-size:10px;line-height:1.2;white-space:nowrap;flex:0 0 auto}
+.quick-pattern-pill .pattern-kind{display:block;padding:2px 6px;font-size:9px;line-height:1.15}
+.quick-pattern-pill .pattern-time{display:block;font-size:10px;line-height:1.15;white-space:nowrap;font-variant-numeric:tabular-nums}
 .quick-pattern-pill .pattern-place{
+  display:block;
   min-width:0;
-  max-width:72px;
+  max-width:118px;
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap;
   color:var(--muted);
   font-size:9.5px;
-  line-height:1.2;
+  line-height:1.15;
 }
 .quick-pattern-pill .pattern-meta{display:none!important}
 .calendar-card{overflow-x:auto}
@@ -186,11 +190,11 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 .fc-dayGridMonth-view .calendar-event-content.month-compact .event-time{font-size:9.5px;font-weight:900}
 .fc-timeGrid-view .calendar-event-content{padding:1px 2px;overflow:visible}
 .fc-timeGrid-view .calendar-event-content .event-time{font-size:9.5px}
-@media(max-width:1100px){.calendar-shell{grid-template-columns:minmax(0,1fr) 205px;gap:12px}.quick-pattern-pill .pattern-place{max-width:60px}}
+@media(max-width:1100px){.calendar-shell{grid-template-columns:minmax(0,1fr) 160px;gap:10px}.quick-pattern-pill .pattern-place{max-width:108px}}
 @media(max-width:850px){
   .calendar-shell{grid-template-columns:1fr}
   .calendar-rail{width:100%}
   .recent-patterns{display:flex;flex-wrap:wrap;align-items:flex-start}
-  .quick-pattern-pill .pattern-place{max-width:90px}
+  .quick-pattern-pill .pattern-place{max-width:118px}
   #calendar{min-width:760px}
 }

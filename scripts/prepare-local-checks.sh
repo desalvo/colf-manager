@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-echo "== colf-manager hardening full package r41: environment preparation =="
+echo "== colf-manager hardening full package r42: environment preparation =="
 
 required=(VERSION pyproject.toml README.md src/colf_manager/templates/dashboard.html)
 for path in "${required[@]}"; do
@@ -34,5 +34,5 @@ for package, minimum in checks.items():
     print(f'{package}: {current}')
 PY
 echo
-echo "Dependencies installed for full package r41."
+echo "Dependencies installed for full package r42."
 echo "Run one command only: scripts/check-all.sh"

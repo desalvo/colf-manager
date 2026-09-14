@@ -92,3 +92,7 @@ Local packaged photographic assets are bundled in `src/colf_manager/static/heroe
 
 ## r32: report approvals and signatures
 Reports may include an approval section for the worker, employer, both, or no signer. Names are prefilled automatically. Place and date can be edited before generation; the proposed date is the report generation date. Signature information is embedded in the archived PDF. Local hero and photographic assets remain bundled under `src/colf_manager/static/heroes/`.
+
+## Calendar: paid work, vacation and sickness
+
+From r37 the same calendar dialog lets the user select **Paid work**, **Vacation** or **Sickness**. Vacation and sickness are stored as timed intervals and may coexist on the same day with paid work. For multi-day periods, both the start and end dates are always included. Vacation and sickness use dedicated colors, while paid work keeps a stable color determined by the employer/worker/location combination. Clicking an interval allows it to be viewed, edited or deleted.

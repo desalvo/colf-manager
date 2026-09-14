@@ -328,6 +328,11 @@ def test_dashboard_selected_period(app, client):
     response = client.get("/?year=2025&month=3")
     assert response.status_code == 200
     assert b"03/2025" in response.data
+    assert "Tredicesima maturata nel mese".encode() in response.data
+    assert "Tredicesima annua maturata finora".encode() in response.data
+    assert "TFR annuo maturato finora".encode() in response.data
+    assert "Giorni di ferie godute nel mese".encode() in response.data
+    assert "Giorni di ferie rimanenti nell'anno".encode() in response.data
 
 
 def test_document_manual_delete(app, client):
@@ -496,3 +501,86 @@ def test_settings_and_mail_notification(app, client, monkeypatch):
     ).status_code == 302
     assert sent["settings"]["security"] == "ssl"
     assert sent["to"] == "recipient@example.invalid"
+
+
+def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):
+    login(client)
+    with app.app_context():
+        employer = Employer(first_name="Mario", last_name="Datore")
+        location = Location(name="Casa")
+        worker = Worker(
+            first_name="Anna",
+            last_name="Lavoratore",
+            employment_start=date(2026, 1, 1),
+            weekly_hours=24,
+            vacation_advance_allowed=True,
+        )
+        db.session.add_all([employer, location, worker])
+        db.session.flush()
+        worker.employer_id = employer.id
+        db.session.commit()
+        worker_id, location_id = worker.id, location.id
+
+    vacation = client.post(
+        "/api/absence",
+        json={
+            "worker_id": worker_id,
+            "kind": "vacation",
+            "start_date": "2026-09-14",
+            "end_date": "2026-09-15",
+            "start_time": "09:00",
+            "end_time": "13:00",
+            "notes": "Ferie programmate",
+        },
+    )
+    assert vacation.status_code == 201
+    absence_id = vacation.json["id"]
+
+    work = client.post(
+        "/api/work",
+        json={
+            "worker_id": worker_id,
+            "location_id": location_id,
+            "work_date": "2026-09-14",
+            "start_time": "14:00",
+            "end_time": "17:00",
+            "break_minutes": 0,
+        },
+    )
+    assert work.status_code == 201
+
+    events = client.get("/api/events").json
+    vacation_events = [e for e in events if e["extendedProps"].get("absence_id") == absence_id]
+    assert len(vacation_events) == 2
+    assert {e["start"][:10] for e in vacation_events} == {"2026-09-14", "2026-09-15"}
+    assert all(e["extendedProps"]["entry_kind"] == "vacation" for e in vacation_events)
+    assert any(e["id"].startswith("work-") and e["start"].startswith("2026-09-14T14:00") for e in events)
+
+    detail = client.get(f"/api/absence/{absence_id}")
+    assert detail.status_code == 200
+    assert detail.json["start_date"] == "2026-09-14"
+    assert detail.json["end_date"] == "2026-09-15"
+
+    updated = client.patch(
+        f"/api/absence/{absence_id}",
+        json={
+            "kind": "sickness",
+            "worker_id": worker_id,
+            "start_date": "2026-09-16",
+            "end_date": "2026-09-16",
+            "start_time": "08:00",
+            "end_time": "12:00",
+            "paid": True,
+        },
+    )
+    assert updated.status_code == 200
+    events = client.get("/api/events").json
+    sickness_events = [e for e in events if e["extendedProps"].get("absence_id") == absence_id]
+    assert len(sickness_events) == 1
+    assert sickness_events[0]["extendedProps"]["entry_kind"] == "sickness"
+    assert sickness_events[0]["start"].startswith("2026-09-16T08:00")
+
+    assert client.delete(f"/api/absence/{absence_id}").status_code == 200
+    with app.app_context():
+        assert Absence.query.count() == 0
+        assert WorkEntry.query.count() == 1

@@ -4,7 +4,7 @@ import os
 import secrets
 import zipfile
 from calendar import monthrange
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from io import BytesIO
 from decimal import Decimal
 from functools import wraps
@@ -44,7 +44,6 @@ from .calculations import (
     inps_contribution_summary,
     estimated_irpef_summary,
     vacation_balance,
-    vacation_hours_per_day,
     vacation_working_days,
 )
 from . import __author__, __build__, __version__
@@ -262,6 +261,19 @@ def _ensure_legacy_schema_compatibility():
             db.session.commit()
         except SQLAlchemyError:
             db.session.rollback()
+
+    inspector = inspect(db.engine)
+    if "absence" in inspector.get_table_names():
+        columns = {c["name"] for c in inspector.get_columns("absence")}
+        statements = []
+        if "start_time" not in columns:
+            statements.append("ALTER TABLE absence ADD COLUMN start_time TIME")
+        if "end_time" not in columns:
+            statements.append("ALTER TABLE absence ADD COLUMN end_time TIME")
+        for statement in statements:
+            db.session.execute(text(statement))
+        if statements:
+            db.session.commit()
 
     try:
         db.session.execute(
@@ -484,14 +496,62 @@ def create_app(test_config=None):
             year, month = today.year, today.month
             flash("Periodo non valido: ripristinato il mese corrente", "error")
         workers = Worker.query.order_by(Worker.last_name).all()
-        stats = {"workers": len(workers), "hours": 0, "pay": 0, "tfr": 0}
+        period_start = date(year, month, 1)
+        period_end = date(year, month, monthrange(year, month)[1])
+        stats = {
+            "workers": len(workers),
+            "hours": 0,
+            "pay": 0,
+            "tfr": 0,
+            "thirteenth_month": 0,
+            "thirteenth_ytd": 0,
+            "tfr_ytd": 0,
+            "vacation_used_month": 0,
+            "vacation_remaining_year": 0,
+        }
         for worker in workers:
-            summary = get_summary(worker.id, year, month)
+            worker_obj, entries, absences_list, expenses_list, rates_list = _worker_data(worker.id)
+            summary = monthly_summary(
+                entries, absences_list, expenses_list, rates_list, year, month, _tfr_factor()
+            )
             stats["hours"] += float(summary["worked_hours"])
             stats["pay"] += float(summary["payable"])
             stats["tfr"] += float(summary["tfr_accrual"])
-        period_start = date(year, month, 1)
-        period_end = date(year, month, monthrange(year, month)[1])
+            stats["thirteenth_month"] += float(summary["thirteenth_accrual"])
+
+            ytd_thirteenth = Decimal("0")
+            ytd_tfr = Decimal("0")
+            for ytd_month in range(1, month + 1):
+                ytd_summary = monthly_summary(
+                    entries,
+                    absences_list,
+                    expenses_list,
+                    rates_list,
+                    year,
+                    ytd_month,
+                    _tfr_factor(),
+                )
+                ytd_thirteenth += Decimal(ytd_summary["thirteenth_accrual"])
+                ytd_tfr += Decimal(ytd_summary["tfr_accrual"])
+            stats["thirteenth_ytd"] += float(ytd_thirteenth)
+            stats["tfr_ytd"] += float(ytd_tfr)
+
+            for absence in absences_list:
+                if absence.kind != "vacation":
+                    continue
+                overlap_start = max(absence.start_date, period_start)
+                overlap_end = min(absence.end_date, period_end)
+                if overlap_start <= overlap_end:
+                    stats["vacation_used_month"] += float(
+                        vacation_working_days(overlap_start, overlap_end)
+                    )
+
+            balance = vacation_balance(
+                worker_obj, absences_list, year, date(year, 12, 31)
+            )
+            stats["vacation_remaining_year"] += float(
+                balance["projected"] - balance["used_scheduled"]
+            )
         recent = (
             WorkEntry.query.filter(
                 WorkEntry.work_date >= period_start,
@@ -860,12 +920,32 @@ def create_app(test_config=None):
             })
             if len(recent_patterns) >= recent_limit:
                 break
+        recent_absences = []
+        for absence in Absence.query.order_by(Absence.start_date.desc(), Absence.id.desc()).limit(12).all():
+            worker = db.session.get(Worker, absence.worker_id)
+            if not worker:
+                continue
+            recent_absences.append({
+                "id": absence.id,
+                "worker_id": absence.worker_id,
+                "worker_name": f"{worker.first_name} {worker.last_name}",
+                "kind": absence.kind,
+                "kind_label": "Ferie" if absence.kind == "vacation" else "Malattia" if absence.kind == "sickness" else "Permesso non retribuito",
+                "start_date": absence.start_date,
+                "end_date": absence.end_date,
+                "start_time": (absence.start_time or time(9, 0)).strftime("%H:%M"),
+                "end_time": (absence.end_time or time(17, 0)).strftime("%H:%M"),
+                "paid": absence.paid,
+                "paid_hours": absence.paid_hours,
+                "notes": absence.notes or "",
+            })
         return render_template(
             "calendar.html",
             workers=workers,
             locations=locations,
             recent_patterns=recent_patterns,
             recent_limit=recent_limit,
+            recent_absences=recent_absences,
         )
 
     @app.get("/api/events")
@@ -890,6 +970,7 @@ def create_app(test_config=None):
                 "textColor": "#ffffff",
                 "extendedProps": {
                     "type": "work",
+                    "entry_kind": "work",
                     "worker_id": entry.worker_id,
                     "worker": f"{worker.first_name} {worker.last_name}" if worker else "",
                     "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
@@ -902,17 +983,42 @@ def create_app(test_config=None):
         aq = Absence.query
         if worker_id:
             aq = aq.filter_by(worker_id=worker_id)
-        colors = {"vacation": "#c58a24", "sickness": "#b94e48", "unpaid_leave": "#68777b"}
-        for absence in aq.all():
-            result.append({
-                "id": f"absence-{absence.id}",
-                "title": absence.kind.replace("_", " "),
-                "start": str(absence.start_date),
-                "end": str(absence.end_date),
-                "allDay": True,
-                "backgroundColor": colors.get(absence.kind),
-                "extendedProps": {"type": "absence"},
-            })
+        colors = {"vacation": "#d39a26", "sickness": "#b84d55", "unpaid_leave": "#68777b"}
+        labels = {"vacation": "Ferie", "sickness": "Malattia", "unpaid_leave": "Permesso non retribuito"}
+        for absence in aq.order_by(Absence.start_date).all():
+            worker = db.session.get(Worker, absence.worker_id)
+            employer = db.session.get(Employer, worker.employer_id) if worker and worker.employer_id else None
+            start_clock = absence.start_time or time(9, 0)
+            end_clock = absence.end_time or time(17, 0)
+            day = absence.start_date
+            while day <= absence.end_date:
+                result.append({
+                    "id": f"absence-{absence.id}-{day.isoformat()}",
+                    "title": labels.get(absence.kind, "Assenza"),
+                    "start": f"{day}T{start_clock.strftime('%H:%M:%S')}",
+                    "end": f"{day}T{end_clock.strftime('%H:%M:%S')}",
+                    "backgroundColor": colors.get(absence.kind, "#68777b"),
+                    "borderColor": colors.get(absence.kind, "#68777b"),
+                    "textColor": "#ffffff",
+                    "editable": False,
+                    "extendedProps": {
+                        "type": "absence",
+                        "entry_kind": absence.kind,
+                        "absence_id": absence.id,
+                        "worker_id": absence.worker_id,
+                        "worker": f"{worker.first_name} {worker.last_name}" if worker else "",
+                        "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
+                        "start_date": str(absence.start_date),
+                        "end_date": str(absence.end_date),
+                        "start_time": start_clock.strftime("%H:%M"),
+                        "end_time": end_clock.strftime("%H:%M"),
+                        "paid": bool(absence.paid),
+                        "paid_hours": str(absence.paid_hours or 0),
+                        "notes": absence.notes or "",
+                        "kind_label": labels.get(absence.kind, "Assenza"),
+                    },
+                })
+                day += timedelta(days=1)
         return jsonify(result)
 
     @app.post("/api/work")
@@ -926,6 +1032,9 @@ def create_app(test_config=None):
             end_time = parse_time(payload["end_time"], "Fine")
             break_minutes = nonnegative_int(payload.get("break_minutes", 0), "Pausa")
             validate_work_times(start_time, end_time, break_minutes)
+            worker_id = int(payload["worker_id"])
+            if db.session.get(Worker, worker_id) is None:
+                raise ValueError("Lavoratore non valido")
             location = None
             location_id = payload.get("location_id")
             if location_id not in (None, ""):
@@ -940,7 +1049,7 @@ def create_app(test_config=None):
             if not location_snapshot:
                 raise ValueError("Il luogo è obbligatorio")
             entry = WorkEntry(
-                worker_id=int(payload["worker_id"]),
+                worker_id=worker_id,
                 location_id=location.id if location else None,
                 work_date=parse_date(payload["work_date"], "Data"),
                 start_time=start_time,
@@ -1005,36 +1114,151 @@ def create_app(test_config=None):
         audit("work_deleted", "work_entry", entry_id)
         return {"ok": True}
 
+    def _absence_values(payload, existing=None):
+        worker_id = int(payload.get("worker_id", existing.worker_id if existing else 0))
+        worker = db.session.get(Worker, worker_id)
+        if worker is None:
+            raise ValueError("Lavoratore non valido")
+        kind = str(payload.get("kind", existing.kind if existing else "vacation"))
+        if kind not in {"vacation", "sickness", "unpaid_leave"}:
+            raise ValueError("Tipo assenza non valido")
+        start_date = parse_date(payload.get("start_date", str(existing.start_date) if existing else ""), "Data iniziale")
+        end_date = parse_date(payload.get("end_date", str(existing.end_date) if existing else str(start_date)), "Data finale")
+        if end_date < start_date:
+            raise ValueError("La data finale deve essere successiva o uguale a quella iniziale")
+        start_clock = parse_time(payload.get("start_time", existing.start_time.strftime("%H:%M") if existing and existing.start_time else "09:00"), "Inizio")
+        end_clock = parse_time(payload.get("end_time", existing.end_time.strftime("%H:%M") if existing and existing.end_time else "17:00"), "Fine")
+        validate_work_times(start_clock, end_clock, 0)
+        duration = Decimal(str((datetime.combine(start_date, end_clock) - datetime.combine(start_date, start_clock)).total_seconds() / 3600))
+        paid_raw = payload.get("paid")
+        if isinstance(paid_raw, str):
+            paid = paid_raw.lower() in {"1", "true", "on", "yes"}
+        elif paid_raw is None and existing is not None:
+            paid = bool(existing.paid)
+        else:
+            paid = bool(paid_raw)
+        if kind == "vacation":
+            paid = True
+        paid_hours_raw = payload.get("paid_hours")
+        if paid_hours_raw not in (None, ""):
+            paid_hours = nonnegative_decimal(paid_hours_raw, "Ore pagate")
+        elif not paid:
+            paid_hours = Decimal("0")
+        elif kind == "vacation":
+            paid_hours = duration * Decimal(vacation_working_days(start_date, end_date))
+        else:
+            paid_hours = duration * Decimal((end_date - start_date).days + 1)
+        return worker, {
+            "worker_id": worker.id,
+            "start_date": start_date,
+            "end_date": end_date,
+            "start_time": start_clock,
+            "end_time": end_clock,
+            "kind": kind,
+            "paid": paid,
+            "paid_hours": paid_hours,
+            "notes": (payload.get("notes") if "notes" in payload else existing.notes if existing else None) or None,
+        }
+
+    def _validate_vacation_balance(worker, absence, replacing=None):
+        if absence.kind != "vacation":
+            return
+        existing = Absence.query.filter_by(worker_id=worker.id).all()
+        if replacing is not None:
+            existing = [item for item in existing if item.id != replacing.id]
+        for year in range(absence.start_date.year, absence.end_date.year + 1):
+            balance = vacation_balance(
+                worker,
+                existing + [absence],
+                year,
+                min(absence.end_date, date(year, 12, 31)),
+            )
+            if balance["available_usable"] < 0:
+                raise ValueError(
+                    f"Ferie insufficienti per {year}: abilita la fruizione anticipata delle ferie da maturare oppure riduci il periodo"
+                )
+
+    @app.post("/api/absence")
+    @login_required
+    def add_absence():
+        try:
+            payload = request.get_json(silent=True) if request.is_json else request.form
+            if not payload:
+                raise ValueError("Payload mancante")
+            worker, values = _absence_values(payload)
+            absence = Absence(**values)
+            _validate_vacation_balance(worker, absence)
+            db.session.add(absence)
+            db.session.commit()
+            audit("absence_created", "absence", absence.id)
+            return jsonify({"id": absence.id}), 201
+        except (ValueError, KeyError, TypeError) as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 400
+
+    @app.get("/api/absence/<int:absence_id>")
+    @login_required
+    def get_absence(absence_id):
+        absence = db.get_or_404(Absence, absence_id)
+        worker = db.session.get(Worker, absence.worker_id)
+        employer = db.session.get(Employer, worker.employer_id) if worker and worker.employer_id else None
+        return jsonify({
+            "id": absence.id,
+            "kind": absence.kind,
+            "worker_id": absence.worker_id,
+            "worker": f"{worker.first_name} {worker.last_name}" if worker else "",
+            "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
+            "start_date": str(absence.start_date),
+            "end_date": str(absence.end_date),
+            "start_time": (absence.start_time or time(9, 0)).strftime("%H:%M"),
+            "end_time": (absence.end_time or time(17, 0)).strftime("%H:%M"),
+            "paid": bool(absence.paid),
+            "paid_hours": str(absence.paid_hours or 0),
+            "notes": absence.notes or "",
+        })
+
+    @app.patch("/api/absence/<int:absence_id>")
+    @login_required
+    def update_absence(absence_id):
+        absence = db.get_or_404(Absence, absence_id)
+        payload = request.get_json(silent=True) or {}
+        try:
+            worker, values = _absence_values(payload, absence)
+            candidate = Absence(**values)
+            _validate_vacation_balance(worker, candidate, replacing=absence)
+            for key, value in values.items():
+                setattr(absence, key, value)
+            db.session.commit()
+            audit("absence_updated", "absence", absence.id)
+            return {"ok": True}
+        except (ValueError, KeyError, TypeError) as exc:
+            db.session.rollback()
+            return jsonify({"error": str(exc)}), 400
+
+    @app.delete("/api/absence/<int:absence_id>")
+    @login_required
+    def delete_absence(absence_id):
+        absence = db.get_or_404(Absence, absence_id)
+        db.session.delete(absence)
+        db.session.commit()
+        audit("absence_deleted", "absence", absence_id)
+        return {"ok": True}
+
     @app.post("/absences")
     @login_required
     def absences():
         try:
-            worker = db.get_or_404(Worker, int(request.form["worker_id"]))
-            start_date = parse_date(request.form["start_date"], "Dal")
-            end_date = parse_date(request.form["end_date"], "Al")
-            if end_date < start_date:
-                raise ValueError("La data finale deve essere successiva o uguale a quella iniziale")
-            kind = request.form["kind"]
-            if kind not in {"vacation", "sickness", "unpaid_leave"}:
-                raise ValueError("Tipo assenza non valido")
-            paid = "paid" in request.form or kind == "vacation"
-            paid_hours_raw = request.form.get("paid_hours")
-            if kind == "vacation" and not paid_hours_raw:
-                paid_hours = Decimal(vacation_working_days(start_date, end_date)) * vacation_hours_per_day(worker)
-            else:
-                paid_hours = nonnegative_decimal(paid_hours_raw, "Ore pagate")
-            absence = Absence(worker_id=worker.id, start_date=start_date, end_date=end_date, kind=kind, paid=paid, paid_hours=paid_hours, notes=request.form.get("notes") or None)
-            if kind == "vacation":
-                existing = Absence.query.filter_by(worker_id=worker.id).all()
-                for year in range(start_date.year, end_date.year + 1):
-                    balance = vacation_balance(worker, existing + [absence], year, min(end_date, date(year, 12, 31)))
-                    if balance["available_usable"] < 0:
-                        raise ValueError(f"Ferie insufficienti per {year}: abilita la fruizione anticipata delle ferie da maturare oppure riduci il periodo")
+            payload = dict(request.form)
+            payload.setdefault("start_time", "09:00")
+            payload.setdefault("end_time", "17:00")
+            worker, values = _absence_values(payload)
+            absence = Absence(**values)
+            _validate_vacation_balance(worker, absence)
             db.session.add(absence)
             db.session.commit()
             audit("absence_created", "absence", absence.id)
             flash("Assenza registrata", "success")
-        except ValueError as exc:
+        except (ValueError, KeyError, TypeError) as exc:
             db.session.rollback()
             flash(str(exc), "error")
         return redirect(url_for("calendar"))

@@ -108,6 +108,8 @@ class Absence(db.Model):
     worker_id = db.Column(db.Integer, db.ForeignKey("worker.id", ondelete="CASCADE"), nullable=False, index=True)
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
+    start_time = db.Column(db.Time)
+    end_time = db.Column(db.Time)
     kind = db.Column(db.String(20), nullable=False)
     paid = db.Column(db.Boolean, default=False, nullable=False)
     paid_hours = db.Column(db.Numeric(8, 2), default=0)

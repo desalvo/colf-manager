@@ -78,7 +78,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 
 
 
-/* r35 bundled local photographic imagery */
+/* r37 bundled local photographic imagery */
 .page-dashboard .hero-photo{background:linear-gradient(145deg,#1c4840cc,#daa35f55),url('heroes/dashboard-hero-photo.png') center/cover !important;}
 .page-dashboard .page-title{background-image:url('heroes/dashboard-title.png') !important;}
 .page-calendar .page-title{background-image:url('heroes/calendar-title.png') !important;}
@@ -103,7 +103,19 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 .page-users-admin .page-title{background-image:url('heroes/users-admin-title.png') !important;}
 .page-change-password .page-title{background-image:url('heroes/change-password-title.png') !important;}
 
-/* r35 compact month calendar entries */
+/* r37 compact month calendar entries */
 .fc-dayGridMonth-view .fc-event{border-radius:7px;overflow:hidden;min-height:22px}
 .fc-dayGridMonth-view .calendar-event-content.month-compact{display:block;padding:2px 5px;font-size:11px;font-weight:800;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em}
 .fc-dayGridMonth-view .fc-event:focus{outline:2px solid #fff;outline-offset:-3px;box-shadow:0 0 0 2px var(--ink)}
+
+/* r37 calendar navigation icons */
+.fc .fc-previousPeriod-button,.fc .fc-nextPeriod-button{min-width:42px;font-size:21px;line-height:1;font-weight:800;padding:.42em .65em!important}.fc .fc-previousPeriod-button:focus-visible,.fc .fc-nextPeriod-button:focus-visible{outline:3px solid rgba(40,125,112,.3);outline-offset:2px}
+
+/* r37 calendar, compact entity lists and icon actions */
+.icon-action{display:inline-grid;place-items:center;width:38px;height:38px;min-width:38px;padding:0;border-radius:10px;border:1px solid #cbd8d2;background:#fff;color:var(--ink);text-decoration:none;font-size:17px;font-weight:800;line-height:1;cursor:pointer;box-shadow:none}.icon-action:hover,.icon-action:focus-visible{background:#edf5f1;border-color:var(--green);outline:2px solid #287d7033;outline-offset:2px}.icon-action.primary-action{background:var(--green);border-color:var(--green);color:#fff}.icon-action.danger-outline{background:#fff;border-color:#d7aaa8;color:#9d3939}.row-actions{display:flex;align-items:center;gap:7px;flex-wrap:nowrap}.row-actions form{margin:0}.hover-details{cursor:help;min-width:0}.hover-details:focus-visible{outline:2px solid var(--green);outline-offset:4px;border-radius:10px}.entity-main>div:last-child{min-width:0}.entity-main b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rate-history{display:grid;gap:12px}.rate-record{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px;border:1px solid var(--line);border-radius:14px;background:#fff}.rate-record-main{min-width:0;flex:1}.rate-record-main>b{display:block;margin-bottom:10px}.rate-record dl{margin:0;display:grid;gap:8px}.rate-record dl>div{display:grid;grid-template-columns:minmax(90px,120px) minmax(0,1fr);gap:10px}.rate-record dt{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:800}.rate-record dd{margin:0;overflow-wrap:anywhere}.rate-record .rate-note{grid-template-columns:1fr!important;gap:2px!important}.calendar-legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin:0 0 16px;font-size:12px;color:var(--muted)}.calendar-legend span{display:inline-flex;align-items:center;gap:7px}.legend-swatch{width:13px;height:13px;border-radius:4px;display:inline-block}.legend-work{background:linear-gradient(135deg,hsl(152 52% 39%),hsl(218 52% 39%))}.legend-vacation{background:#d39a26}.legend-sickness{background:#b84d55}.absence-list{display:grid;gap:8px}.absence-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}.absence-row:last-child{border-bottom:0}.absence-row>div{display:grid;min-width:0}.absence-row small{color:var(--muted);white-space:normal}.work-dialog #absenceOnlyFields,.work-dialog #workOnlyFields{margin-top:2px}.calendar-event-content{overflow:hidden}.calendar-event-content span,.calendar-event-content small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.month-compact{font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fc-event{cursor:pointer}.fc-event[style*="rgb(211, 154, 38)"],.fc-event[style*="rgb(184, 77, 85)"]{cursor:pointer}
+@media(max-width:850px){.rate-record{align-items:center}.rate-record dl>div{grid-template-columns:1fr}.row-actions{gap:5px}.icon-action{width:36px;height:36px;min-width:36px}.calendar-legend{font-size:11px}}
+
+/* r39 dashboard extended period indicators */
+.dashboard-stats{grid-template-columns:repeat(3,minmax(0,1fr));}
+@media(max-width:1100px){.dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:600px){.dashboard-stats{grid-template-columns:1fr;}}

@@ -2,6 +2,10 @@ let calendar;
 const workDialog = document.getElementById('workDialog');
 const workForm = document.getElementById('workForm');
 const deleteWorkButton = document.getElementById('deleteWorkButton');
+const entryKind = document.getElementById('entryKind');
+const workOnlyFields = document.getElementById('workOnlyFields');
+const absenceOnlyFields = document.getElementById('absenceOnlyFields');
+const endDateField = document.getElementById('endDateField');
 
 function csrfToken() {
   return document.querySelector('meta[name="csrf-token"]').content;
@@ -22,41 +26,109 @@ function addMinutes(date, minutes) {
   return new Date(date.getTime() + Number(minutes) * 60000);
 }
 
+function syncEntryKind() {
+  const isWork = entryKind.value === 'work';
+  workOnlyFields.classList.toggle('hidden', !isWork);
+  absenceOnlyFields.classList.toggle('hidden', isWork);
+  endDateField.classList.toggle('hidden', isWork);
+  workForm.querySelector('[name=location_id]').required = isWork;
+  workForm.querySelector('[name=end_date]').required = !isWork;
+  if (!isWork) {
+    const firstDate = workForm.querySelector('[name=work_date]').value;
+    if (!workForm.querySelector('[name=end_date]').value) workForm.querySelector('[name=end_date]').value = firstDate;
+    const paid = document.getElementById('paidAbsence');
+    if (entryKind.value === 'vacation') {
+      paid.checked = true;
+      paid.disabled = true;
+    } else {
+      paid.disabled = false;
+    }
+  }
+}
+
 function resetWorkForm() {
   workForm.reset();
-  workForm.querySelector('[name=entry_id]').value = '';
+  workForm.querySelector('[name=record_id]').value = '';
+  entryKind.value = 'work';
   workForm.querySelector('[name=start_time]').value = '09:00';
   workForm.querySelector('[name=end_time]').value = '13:00';
   workForm.querySelector('[name=break_minutes]').value = '0';
-  document.getElementById('workDialogTitle').textContent = 'Registra ore';
+  document.getElementById('workDialogTitle').textContent = 'Nuova registrazione';
   deleteWorkButton.classList.add('hidden');
+  syncEntryKind();
 }
 
-function openWorkModal(day, startTime) {
+function openEntryModal(day, startTime, kind = 'work') {
   resetWorkForm();
+  entryKind.value = kind;
   const chosen = day || localDateString(calendar.getDate());
   workForm.querySelector('[name=work_date]').value = chosen;
+  workForm.querySelector('[name=end_date]').value = chosen;
   if (startTime) {
     workForm.querySelector('[name=start_time]').value = startTime;
     const [hour, minute] = startTime.split(':').map(Number);
     const end = new Date(2000, 0, 1, hour, minute + 60);
     workForm.querySelector('[name=end_time]').value = timeString(end);
   }
+  syncEntryKind();
+  workDialog.showModal();
+}
+window.openEntryModal = openEntryModal;
+
+function openEditModal(event) {
+  resetWorkForm();
+  const props = event.extendedProps;
+  if (props.type === 'work') {
+    entryKind.value = 'work';
+    workForm.querySelector('[name=record_id]').value = event.id.replace('work-', '');
+    workForm.querySelector('[name=worker_id]').value = props.worker_id;
+    workForm.querySelector('[name=work_date]').value = event.startStr.slice(0, 10);
+    workForm.querySelector('[name=start_time]').value = event.startStr.slice(11, 16);
+    workForm.querySelector('[name=end_time]').value = event.endStr.slice(11, 16);
+    workForm.querySelector('[name=location_id]').value = props.location_id || '';
+    workForm.querySelector('[name=break_minutes]').value = props.break_minutes || 0;
+    workForm.querySelector('[name=notes]').value = props.notes || '';
+    document.getElementById('workDialogTitle').textContent = 'Modifica ore retribuite';
+  } else if (props.type === 'absence') {
+    entryKind.value = props.entry_kind;
+    workForm.querySelector('[name=record_id]').value = props.absence_id;
+    workForm.querySelector('[name=worker_id]').value = props.worker_id;
+    workForm.querySelector('[name=work_date]').value = props.start_date;
+    workForm.querySelector('[name=end_date]').value = props.end_date;
+    workForm.querySelector('[name=start_time]').value = props.start_time;
+    workForm.querySelector('[name=end_time]').value = props.end_time;
+    workForm.querySelector('[name=paid]').checked = Boolean(props.paid);
+    workForm.querySelector('[name=paid_hours]').value = props.paid_hours || '';
+    workForm.querySelector('[name=notes]').value = props.notes || '';
+    document.getElementById('workDialogTitle').textContent = props.entry_kind === 'vacation' ? 'Modifica ferie' : 'Modifica malattia';
+  } else {
+    return;
+  }
+  syncEntryKind();
+  deleteWorkButton.classList.remove('hidden');
   workDialog.showModal();
 }
 
-function openEditModal(event) {
-  if (event.extendedProps.type !== 'work') return;
+async function openAbsenceById(absenceId) {
+  const response = await fetch(`/api/absence/${absenceId}`);
+  if (!response.ok) {
+    alert('Impossibile caricare la registrazione.');
+    return;
+  }
+  const data = await response.json();
   resetWorkForm();
-  workForm.querySelector('[name=entry_id]').value = event.id.replace('work-', '');
-  workForm.querySelector('[name=worker_id]').value = event.extendedProps.worker_id;
-  workForm.querySelector('[name=work_date]').value = event.startStr.slice(0, 10);
-  workForm.querySelector('[name=start_time]').value = event.startStr.slice(11, 16);
-  workForm.querySelector('[name=end_time]').value = event.endStr.slice(11, 16);
-  workForm.querySelector('[name=location_id]').value = event.extendedProps.location_id || '';
-  workForm.querySelector('[name=break_minutes]').value = event.extendedProps.break_minutes || 0;
-  workForm.querySelector('[name=notes]').value = event.extendedProps.notes || '';
-  document.getElementById('workDialogTitle').textContent = 'Modifica registrazione ore';
+  entryKind.value = data.kind;
+  workForm.querySelector('[name=record_id]').value = data.id;
+  workForm.querySelector('[name=worker_id]').value = data.worker_id;
+  workForm.querySelector('[name=work_date]').value = data.start_date;
+  workForm.querySelector('[name=end_date]').value = data.end_date;
+  workForm.querySelector('[name=start_time]').value = data.start_time;
+  workForm.querySelector('[name=end_time]').value = data.end_time;
+  workForm.querySelector('[name=paid]').checked = Boolean(data.paid);
+  workForm.querySelector('[name=paid_hours]').value = data.paid_hours || '';
+  workForm.querySelector('[name=notes]').value = data.notes || '';
+  document.getElementById('workDialogTitle').textContent = data.kind === 'vacation' ? 'Modifica ferie' : 'Modifica malattia';
+  syncEntryKind();
   deleteWorkButton.classList.remove('hidden');
   workDialog.showModal();
 }
@@ -74,10 +146,27 @@ async function saveWork(payload, entryId) {
   return data;
 }
 
-async function deleteCurrentWork() {
-  const entryId = workForm.querySelector('[name=entry_id]').value;
-  if (!entryId || !confirm('Eliminare definitivamente questa registrazione di ore?')) return;
-  const response = await fetch(`/api/work/${entryId}`, {
+async function saveAbsence(payload, absenceId) {
+  const url = absenceId ? `/api/absence/${absenceId}` : '/api/absence';
+  const method = absenceId ? 'PATCH' : 'POST';
+  const response = await fetch(url, {
+    method,
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken()},
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || 'Controlla i dati inseriti.');
+  return data;
+}
+
+async function deleteCurrentRecord() {
+  const recordId = workForm.querySelector('[name=record_id]').value;
+  if (!recordId) return;
+  const kind = entryKind.value;
+  const isWork = kind === 'work';
+  const label = isWork ? 'questa registrazione di ore' : kind === 'vacation' ? 'queste ferie' : 'questa malattia';
+  if (!confirm(`Eliminare definitivamente ${label}?`)) return;
+  const response = await fetch(isWork ? `/api/work/${recordId}` : `/api/absence/${recordId}`, {
     method: 'DELETE',
     headers: {'X-CSRFToken': csrfToken()},
   });
@@ -111,6 +200,13 @@ function initExternalPatterns() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  entryKind.addEventListener('change', syncEntryKind);
+  workForm.querySelector('[name=work_date]').addEventListener('change', () => {
+    if (entryKind.value !== 'work' && !workForm.querySelector('[name=end_date]').value) {
+      workForm.querySelector('[name=end_date]').value = workForm.querySelector('[name=work_date]').value;
+    }
+  });
+
   calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
     initialView: 'timeGridWeek',
     locale: 'it',
@@ -119,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
     selectable: true,
     droppable: true,
     nowIndicator: true,
-    allDaySlot: true,
+    allDaySlot: false,
     slotDuration: '00:30:00',
     slotMinTime: '06:00:00',
     slotMaxTime: '23:00:00',
@@ -127,93 +223,71 @@ document.addEventListener('DOMContentLoaded', () => {
     expandRows: true,
     eventMinHeight: 28,
     eventTimeFormat: {hour: '2-digit', minute: '2-digit', hour12: false},
-    headerToolbar: {
-      left: 'prev,next today',
-      center: 'title',
-      right: 'dayGridMonth,timeGridWeek,timeGridDay',
+    customButtons: {
+      previousPeriod: {text: '←', hint: 'Periodo precedente', click: () => calendar.prev()},
+      nextPeriod: {text: '→', hint: 'Periodo successivo', click: () => calendar.next()},
     },
+    headerToolbar: {left: 'previousPeriod,nextPeriod today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay'},
     buttonText: {today: 'Oggi', month: 'Mese', week: 'Settimana', day: 'Giorno'},
     events: (info, ok, fail) => fetch(`/api/events?worker_id=${document.getElementById('workerFilter').value}`)
       .then((response) => response.json()).then(ok).catch(fail),
-    dateClick: (info) => {
-      const startTime = info.allDay ? null : timeString(info.date);
-      openWorkModal(info.dateStr.slice(0, 10), startTime);
-    },
+    dateClick: (info) => openEntryModal(info.dateStr.slice(0, 10), info.allDay ? null : timeString(info.date)),
     eventClick: (info) => openEditModal(info.event),
     eventDrop: async (info) => {
-      if (!info.event.id.startsWith('work-')) return info.revert();
+      if (info.event.extendedProps.type !== 'work') return info.revert();
       try {
-        await saveWork({
-          work_date: info.event.startStr.slice(0, 10),
-          start_time: info.event.startStr.slice(11, 16),
-          end_time: info.event.endStr?.slice(11, 16),
-        }, info.event.id.replace('work-', ''));
-      } catch (error) {
-        alert(error.message);
-        info.revert();
-      }
+        await saveWork({work_date: info.event.startStr.slice(0, 10), start_time: info.event.startStr.slice(11, 16), end_time: info.event.endStr?.slice(11, 16)}, info.event.id.replace('work-', ''));
+      } catch (error) { alert(error.message); info.revert(); }
     },
     eventResize: async (info) => {
-      if (!info.event.id.startsWith('work-')) return info.revert();
+      if (info.event.extendedProps.type !== 'work') return info.revert();
       try {
-        await saveWork({
-          work_date: info.event.startStr.slice(0, 10),
-          start_time: info.event.startStr.slice(11, 16),
-          end_time: info.event.endStr?.slice(11, 16),
-        }, info.event.id.replace('work-', ''));
-      } catch (error) {
-        alert(error.message);
-        info.revert();
-      }
+        await saveWork({work_date: info.event.startStr.slice(0, 10), start_time: info.event.startStr.slice(11, 16), end_time: info.event.endStr?.slice(11, 16)}, info.event.id.replace('work-', ''));
+      } catch (error) { alert(error.message); info.revert(); }
     },
     eventReceive: async (info) => {
       const props = info.event.extendedProps;
       if (!props.quickPattern) return;
       try {
         const end = info.event.end || addMinutes(info.event.start, props.duration_minutes || 60);
-        await saveWork({
-          worker_id: props.worker_id,
-          location_id: props.location_id,
-          work_date: localDateString(info.event.start),
-          start_time: timeString(info.event.start),
-          end_time: timeString(end),
-          break_minutes: props.break_minutes || 0,
-        });
+        await saveWork({worker_id: props.worker_id, location_id: props.location_id, work_date: localDateString(info.event.start), start_time: timeString(info.event.start), end_time: timeString(end), break_minutes: props.break_minutes || 0});
         info.event.remove();
         calendar.refetchEvents();
-      } catch (error) {
-        alert(error.message);
-        info.event.remove();
-      }
+      } catch (error) { alert(error.message); info.event.remove(); }
     },
     eventContent: (arg) => {
-      if (arg.event.extendedProps.type !== 'work') return undefined;
       const props = arg.event.extendedProps;
       const wrap = document.createElement('div');
       const isMonth = arg.view.type === 'dayGridMonth';
       wrap.className = isMonth ? 'calendar-event-content month-compact' : 'calendar-event-content';
+      const start = arg.event.start ? timeString(arg.event.start) : '';
+      const end = arg.event.end ? timeString(arg.event.end) : '';
       if (isMonth) {
-        const start = arg.event.start ? timeString(arg.event.start) : '';
-        const end = arg.event.end ? timeString(arg.event.end) : '';
         wrap.textContent = end ? `${start}–${end}` : start;
-      } else {
+      } else if (props.type === 'work') {
         wrap.innerHTML = `<b>${arg.timeText}</b><span>${props.worker}</span><small>${props.employer}</small><small>${props.location}</small>`;
+      } else {
+        wrap.innerHTML = `<b>${arg.timeText}</b><span>${props.kind_label}</span><small>${props.worker}</small><small>${props.employer}</small>`;
       }
       return {domNodes: [wrap]};
     },
     eventDidMount: (info) => {
-      if (info.event.extendedProps.type !== 'work') return;
       const props = info.event.extendedProps;
       const start = info.event.start ? timeString(info.event.start) : '';
       const end = info.event.end ? timeString(info.event.end) : '';
-      const details = [
+      const details = props.type === 'work' ? [
         `${start}${end ? `–${end}` : ''}`,
         `Lavoratore: ${props.worker || '—'}`,
         `Datore: ${props.employer || '—'}`,
         `Luogo: ${props.location || '—'}`,
-      ].join('\n');
-      info.el.title = details;
-      info.el.setAttribute('aria-label', details.replaceAll('\n', '. '));
+      ] : [
+        `${props.kind_label}: ${start}${end ? `–${end}` : ''}`,
+        `Lavoratore: ${props.worker || '—'}`,
+        `Datore: ${props.employer || '—'}`,
+        `Periodo: ${props.start_date} → ${props.end_date} (estremi inclusi)`,
+      ];
+      info.el.title = details.join('\n');
+      info.el.setAttribute('aria-label', details.join('. '));
       info.el.tabIndex = 0;
     },
   });
@@ -221,18 +295,35 @@ document.addEventListener('DOMContentLoaded', () => {
   initExternalPatterns();
   document.getElementById('workerFilter').addEventListener('change', () => calendar.refetchEvents());
 
+  document.querySelectorAll('.edit-absence-shortcut').forEach((button) => button.addEventListener('click', () => {
+    openAbsenceById(button.dataset.absenceId);
+  }));
+
   workForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const formData = Object.fromEntries(new FormData(workForm));
-    const entryId = formData.entry_id;
-    delete formData.entry_id;
+    const recordId = formData.record_id;
+    const kind = formData.entry_kind;
+    delete formData.record_id;
+    delete formData.entry_kind;
     try {
-      await saveWork(formData, entryId);
+      if (kind === 'work') {
+        delete formData.end_date;
+        delete formData.paid;
+        delete formData.paid_hours;
+        await saveWork(formData, recordId);
+      } else {
+        formData.kind = kind;
+        formData.start_date = formData.work_date;
+        delete formData.work_date;
+        delete formData.location_id;
+        delete formData.break_minutes;
+        formData.paid = document.getElementById('paidAbsence').checked;
+        await saveAbsence(formData, recordId);
+      }
       workDialog.close();
       calendar.refetchEvents();
-    } catch (error) {
-      alert(error.message);
-    }
+    } catch (error) { alert(error.message); }
   });
-  deleteWorkButton.addEventListener('click', deleteCurrentWork);
+  deleteWorkButton.addEventListener('click', deleteCurrentRecord);
 });

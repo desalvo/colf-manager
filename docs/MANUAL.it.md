@@ -92,3 +92,7 @@ Local packaged photographic assets are bundled in `src/colf_manager/static/heroe
 
 ## Novità r32: approvazione e firme nei report
 I report possono includere una sezione di approvazione con firma del lavoratore, del datore di lavoro, di entrambi oppure nessuna firma. I nomi sono precompilati automaticamente. Luogo e data sono modificabili prima della generazione; la data proposta è quella di generazione del report. Le informazioni di firma vengono incorporate nel PDF archiviato. Gli hero e gli elementi fotografici locali restano inclusi nel pacchetto in `src/colf_manager/static/heroes/`.
+
+## Calendario: ore, ferie e malattia
+
+Dalla r37 la stessa finestra del calendario consente di scegliere **Ore retribuite**, **Ferie** o **Malattia**. Ferie e malattia sono registrate come intervalli orari e possono coesistere nello stesso giorno con ore retribuite. Per periodi di più giorni, la data iniziale e finale sono sempre comprese. Le ferie sono mostrate in colore dedicato, la malattia in un secondo colore dedicato; le ore retribuite mantengono un colore stabile determinato dalla combinazione datore/lavoratore/luogo. Cliccando un intervallo è possibile visualizzarlo, modificarlo o eliminarlo.

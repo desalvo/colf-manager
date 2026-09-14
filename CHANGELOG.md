@@ -41,3 +41,67 @@
 - Commit transactional DDL created on the advisory-lock connection before compatibility checks and ORM queries.
 - Keep the session-level PostgreSQL advisory lock held across the full bootstrap sequence.
 - Prevent fresh Docker/Podman deployments from failing with `relation "user" does not exist`.
+
+## r16-full - 2026-09-14
+
+- Complete CRUD for workers and household employers, including optional address, phone and e-mail.
+- Safe permanent deletion workflows.
+- Worker-to-employer association.
+- Correct previous/next month calendar controls and direct return to dashboard.
+- Automatic accrued/projected vacation entitlement with optional advance use through year end.
+- Automatic vacation paid-hours estimate for hourly workers.
+- Estimated thirteenth-month and TFR accrual integrated in monthly/annual calculations.
+- Professional PDF reports: monthly payroll, annual payroll, courtesy CU/income certification, annual TFR, hours/pay trend.
+- Year-aware legal rule notes and official-source disclaimers.
+- Alembic revision 1001 for employer and vacation-policy schema changes.
+## r17-full - 2026-09-14
+
+- Cedolino PDF specifico della tredicesima.
+- Prospetto PDF cumulativo tredicesima + TFR con descrizione delle formule e del periodo.
+- Numero contratto di lavoro e tipo contratto nell'anagrafica del lavoratore.
+- Opzione contrattuale per porre economicamente a carico del datore anche le quote del lavoratore.
+- Stima contributi INPS nei report quando posizione INPS e numero contratto sono presenti.
+- Separazione tra contributi INPS e stima IRPEF: il datore domestico privato non viene trattato come sostituto d'imposta.
+- Tabelle contributive 2025/2026 e indicazione della fonte/anno nei prospetti.
+- Migration Alembic 1002_contract_tax_reporting.
+
+## r19-full - 2026-09-14
+
+- Fixed Ruff E701/E702/E741/F401/F841 failures introduced by the reporting work.
+- Restored formatter-clean manual generator.
+- Made monthly payroll PDF backward compatible when a summary lacks `thirteenth_accrual`.
+- Updated PDF regression test to include the thirteenth accrual field.
+- Updated production/local gate markers to r18.
+
+## r19-full - 2026-09-14
+
+- Added complete location management (create, view, edit, delete).
+- Calendar now selects from registered locations.
+- Historical work entries keep a location snapshot after location edits/deletion.
+- Added database migration 1003_locations and regression tests.
+
+## r20-full - 2026-09-14
+
+- Unified worker terminology throughout the application and documentation.
+- Added author, version and build to the application sidebar.
+- Persist generated PDF reports and allow manual download/deletion.
+- Added manual document deletion.
+- Added full database/document/report ZIP export and destructive confirmed import.
+- Added automatic orphan-file garbage collection for Docker/Podman and Kubernetes.
+- Added selectable dashboard month/year and retroactive calendar entry defaults.
+
+## r21-full - 2026-09-14
+
+- Added regression tests for complete export/import and orphan-file maintenance.
+- Restored production coverage above the configured 65% threshold without lowering it.
+- Removed Bandit B608 by replacing dynamic PostgreSQL sequence SQL with bound queries and SQLAlchemy expressions.
+- Production and local quality gates are now non-mutating (`ruff check` + `ruff format --check`).
+- Compose validation continues to inject validation-only secrets without weakening production secret requirements.
+
+## r23-full - 2026-09-14
+
+- Formatted Alembic migrations `1003_locations.py` and `1004_generated_reports.py` to pass `ruff format --check`.
+- Formatted `backup.py` and `storage.py` to pass `ruff format --check`.
+- No functional behavior change from r21.
+- Build and verification markers updated to r23-full.
+

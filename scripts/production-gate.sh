@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager full package r15: production gate =="
+echo "== colf-manager full package r23: production gate =="
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" && -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: activate .venv first for local execution." >&2
@@ -13,15 +13,17 @@ version="$(cat VERSION)"
 test "$version" = "$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
 test "$version" = "$(python -c 'import colf_manager; print(colf_manager.__version__)')"
 
-ruff check --fix .
-ruff format .
 ruff check .
 ruff format --check .
 pytest
 bandit -q -r src -x tests
 pip-audit .
 
-env   POSTGRES_PASSWORD='validation-only-postgres-password'   COLF_MANAGER_SECRET_KEY='validation-only-secret-key-0123456789abcdef0123456789abcdef'   COLF_MANAGER_ADMIN_PASSWORD='Validation-admin-password-1234'   docker compose config --quiet
+env \
+  POSTGRES_PASSWORD='validation-only-postgres-password' \
+  COLF_MANAGER_SECRET_KEY='validation-only-secret-key-0123456789abcdef0123456789abcdef' \
+  COLF_MANAGER_ADMIN_PASSWORD='Validation-admin-password-1234' \
+  docker compose config --quiet
 
 COLF_MANAGER_PRODUCTION=0 COLF_MANAGER_DATA="$(mktemp -d)"   flask --app colf_manager.app:create_app db heads
 
@@ -62,6 +64,8 @@ required = [
     Path("kubernetes/network-policy.yaml"),
     Path("kubernetes/ingress.yaml"),
     Path("kubernetes/kustomization.yaml"),
+    Path("kubernetes/maintenance.yaml"),
+    Path("migrations/versions/1004_generated_reports.py"),
     Path("SECURITY.md"),
     Path("LICENSE"),
     Path("output/pdf/colf-manager-manual-v1.0.0-it.pdf"),
@@ -69,6 +73,9 @@ required = [
     Path("src/colf_manager/static/logo.svg"),
     Path("src/colf_manager/static/logo.png"),
     Path("migrations/versions/1000_hardened_baseline.py"),
+    Path("migrations/versions/1001_employers_vacation_reports.py"),
+    Path("migrations/versions/1002_contract_tax_reporting.py"),
+    Path("migrations/versions/1003_locations.py"),
 ]
 
 missing = [str(path) for path in required if not path.is_file() or path.stat().st_size == 0]
@@ -88,7 +95,7 @@ if any(count < 2 for count in pages.values()):
 
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r15-full",
+    "overlay_revision": "r23-full",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -116,4 +123,4 @@ Path("dist/production-evidence.json").write_text(
 )
 PY
 
-echo "Production gate r15 full passed."
+echo "Production gate r23 full passed."

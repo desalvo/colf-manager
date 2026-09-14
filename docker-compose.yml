@@ -12,7 +12,7 @@ services:
   app:
     build: .
     image: desalvo/colf-manager:${COLF_MANAGER_IMAGE_TAG:-latest}
-    environment:
+    environment: &app-env
       DATABASE_URL: postgresql+psycopg://colf_manager:${POSTGRES_PASSWORD}@db/colf_manager
       COLF_MANAGER_SECRET_KEY: ${COLF_MANAGER_SECRET_KEY:?set COLF_MANAGER_SECRET_KEY}
       COLF_MANAGER_ADMIN_PASSWORD: ${COLF_MANAGER_ADMIN_PASSWORD:?set COLF_MANAGER_ADMIN_PASSWORD}
@@ -21,8 +21,22 @@ services:
       COLF_MANAGER_PROXY_FIX: ${COLF_MANAGER_PROXY_FIX:-0}
       COLF_MANAGER_SESSION_MINUTES: ${COLF_MANAGER_SESSION_MINUTES:-60}
       COLF_MANAGER_RATELIMIT_STORAGE: ${COLF_MANAGER_RATELIMIT_STORAGE:-memory://}
+      COLF_MANAGER_ORPHAN_RETENTION_HOURS: ${COLF_MANAGER_ORPHAN_RETENTION_HOURS:-24}
       GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
     ports: ["8000:8000"]
+    volumes: ["app-data:/data"]
+    depends_on: {db: {condition: service_healthy}}
+    read_only: true
+    tmpfs: ["/tmp"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    restart: unless-stopped
+  maintenance:
+    image: desalvo/colf-manager:${COLF_MANAGER_IMAGE_TAG:-latest}
+    environment:
+      <<: *app-env
+      COLF_MANAGER_MAINTENANCE_INTERVAL_SECONDS: ${COLF_MANAGER_MAINTENANCE_INTERVAL_SECONDS:-86400}
+    command: ["python", "-m", "colf_manager.maintenance", "--loop"]
     volumes: ["app-data:/data"]
     depends_on: {db: {condition: service_healthy}}
     read_only: true

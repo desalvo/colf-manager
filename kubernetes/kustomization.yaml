@@ -9,5 +9,6 @@ resources:
   - database.yaml
   - application.yaml
   - backup.yaml
+  - maintenance.yaml
   - network-policy.yaml
   - ingress.yaml

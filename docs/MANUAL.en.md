@@ -40,6 +40,38 @@ Records are personal data and may include health-related information. Use HTTPS,
 
 `scripts/release-check.sh` runs lint, tests/coverage, Bandit, dependency auditing, EN/IT PDF generation, wheel/sdist, `twine check`, CycloneDX SBOM and package verification. GitHub gates use Python 3.11-3.13, secret scanning, CodeQL, Docker Compose/Kubernetes validation, multi-architecture image builds, Trivy and provenance attestation.
 
+## Records and complete deletion
+
+Workers and household employers can be created, viewed, edited and permanently deleted. Address, phone and e-mail are optional. Permanently deleting a worker also deletes linked time entries, absences, rates, expenses and documents; deleting an employer unlinks workers without deleting them.
+
+## Automatic vacation entitlement
+
+The engine uses 26 working days per year and monthly twelfths. A service fraction of at least 15 calendar days counts as a full month. Vacation days are counted Monday through Saturday excluding Sundays and Italian national holidays; local patron-saint holidays must be checked separately. For hourly workers, paid vacation hours use average monthly hours divided by 26. Each worker can optionally use vacation that is projected to accrue by 31 December before it has fully accrued.
+
+## TFR and annual reports
+
+For relationships from 1990 onward, the annual TFR report uses recorded useful compensation, includes estimated thirteenth-month accrual and divides by 13.5. The current-year quota is not revalued; prior accrued balances require the statutory article 2120 revaluation (1.5% fixed plus 75% of the December-to-December ISTAT FOI increase). PDF outputs include monthly payroll, annual payroll, courtesy annual income certification, annual TFR and monthly hours/pay trend. Rules for 2025 and 2026 are marked as verified in this package; other years explicitly require checking official sources.
+
+## Courtesy CU / income certification
+
+A private household employer is normally not an Italian withholding agent. The generated PDF is therefore a courtesy income certification based on recorded data and is not the electronic Certificazione Unica filed by a withholding agent.
+
 ## Limitations
 
 The software does not replace a payroll professional, submit statutory filings or guarantee that user-supplied parameters satisfy current law.
+
+## Thirteenth salary, TFR and contributions
+
+Reports include a dedicated thirteenth-salary payslip and a combined thirteenth salary + TFR statement with formulas and period details. When INPS position and contract number are recorded, PDFs add estimated INPS contributions and a separately identified indicative IRPEF calculation.
+
+
+## Locations
+
+The **Locations** section lets users create, view, edit and delete work locations. Each location has a name, optional address and notes. New calendar work entries can select a registered location. To preserve history, each work entry also stores a textual snapshot: editing or deleting the location record does not rewrite past work entries.
+
+
+## Archive, reports and full backup
+
+Generated PDF reports are persisted on application storage and can be downloaded again or manually deleted. Uploaded documents can also be manually deleted. Administrators can create a complete ZIP export containing application database rows, referenced documents and archived reports, and can perform a confirmed full restore. Files present on storage but no longer referenced by the database are automatically removed by the maintenance service after the configured retention period.
+
+The Dashboard can be viewed for a selected month and year. The calendar supports navigation to prior months and retroactive work-entry creation in the displayed period.

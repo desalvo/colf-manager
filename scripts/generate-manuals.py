@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 import re
 from pathlib import Path
 
@@ -8,7 +9,14 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import BaseDocTemplate, Frame, Image, PageTemplate, Paragraph, Spacer
+from reportlab.platypus import (
+    BaseDocTemplate,
+    Frame,
+    Image,
+    PageTemplate,
+    Paragraph,
+    Spacer,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output" / "pdf"
@@ -21,13 +29,22 @@ def header_footer(canvas, doc):
     canvas.setFillColor(colors.HexColor("#173f3a"))
     canvas.rect(0, A4[1] - 23 * mm, A4[0], 23 * mm, fill=1, stroke=0)
     canvas.drawImage(
-        ImageReader(str(LOGO)), 18 * mm, A4[1] - 19 * mm, 12 * mm, 12 * mm, mask="auto"
+        ImageReader(str(LOGO)),
+        18 * mm,
+        A4[1] - 19 * mm,
+        12 * mm,
+        12 * mm,
+        mask="auto",
     )
     canvas.setFillColor(colors.HexColor("#f7f1e8"))
     canvas.setFont("Helvetica-Bold", 13)
     canvas.drawString(33 * mm, A4[1] - 14 * mm, "colf-manager")
     canvas.setFont("Helvetica", 8)
-    canvas.drawRightString(A4[0] - 18 * mm, A4[1] - 14 * mm, "1.0.0 · Alessandro De Salvo")
+    canvas.drawRightString(
+        A4[0] - 18 * mm,
+        A4[1] - 14 * mm,
+        "1.0.0 · Alessandro De Salvo",
+    )
     canvas.setFillColor(colors.HexColor("#667873"))
     canvas.drawRightString(A4[0] - 18 * mm, 11 * mm, str(doc.page))
     canvas.restoreState()
@@ -92,7 +109,15 @@ def build(lang):
     doc.addPageTemplates(
         PageTemplate(
             id="main",
-            frames=[Frame(doc.leftMargin, doc.bottomMargin, doc.width, doc.height, id="body")],
+            frames=[
+                Frame(
+                    doc.leftMargin,
+                    doc.bottomMargin,
+                    doc.width,
+                    doc.height,
+                    id="body",
+                )
+            ],
             onPage=header_footer,
         )
     )
@@ -102,11 +127,21 @@ def build(lang):
         if not line:
             story.append(Spacer(1, 0.8 * mm))
             continue
-        clean = re.sub(r"`([^`]+)`", r"<font name='Courier'>\1</font>", line)
+        clean = re.sub(
+            r"`([^`]+)`",
+            r"<font name='Courier'>\1</font>",
+            line,
+        )
         if line.startswith("# "):
             img = Image(str(LOGO), width=32 * mm, height=32 * mm)
             img.hAlign = "LEFT"
-            story.extend([img, Spacer(1, 2 * mm), Paragraph(clean[2:], styles["CMTitle"])])
+            story.extend(
+                [
+                    img,
+                    Spacer(1, 2 * mm),
+                    Paragraph(clean[2:], styles["CMTitle"]),
+                ]
+            )
         elif line.startswith("## "):
             story.append(Paragraph(clean[3:], styles["CMH2"]))
         elif line.startswith("- "):

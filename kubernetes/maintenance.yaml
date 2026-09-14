@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: colf-manager-maintenance
+  namespace: colf-manager
+  labels:
+    app.kubernetes.io/name: colf-manager
+    app.kubernetes.io/component: maintenance
+spec:
+  schedule: "37 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: colf-manager-maintenance
+            app.kubernetes.io/name: colf-manager
+            app.kubernetes.io/component: maintenance
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile: {type: RuntimeDefault}
+            fsGroup: 1000
+          containers:
+            - name: maintenance
+              image: desalvo/colf-manager:latest
+              imagePullPolicy: Always
+              command: ["python", "-m", "colf_manager.maintenance", "--once"]
+              env:
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: colf-manager-database, key: postgres-password}
+                - name: DATABASE_URL
+                  value: postgresql+psycopg://colf_manager:$(POSTGRES_PASSWORD)@postgres/colf_manager
+                - name: COLF_MANAGER_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: {name: colf-manager-application, key: app-secret}
+                - name: COLF_MANAGER_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: colf-manager-application, key: admin-password}
+                - name: COLF_MANAGER_PRODUCTION
+                  value: "1"
+                - name: COLF_MANAGER_ORPHAN_RETENTION_HOURS
+                  value: "24"
+              volumeMounts:
+                - {name: data, mountPath: /data}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+                readOnlyRootFilesystem: true
+              resources:
+                requests: {cpu: 20m, memory: 96Mi}
+                limits: {cpu: 200m, memory: 256Mi}
+          volumes:
+            - name: data
+              persistentVolumeClaim: {claimName: app-data}

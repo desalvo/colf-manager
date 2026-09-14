@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-echo "== colf-manager hardening overlay r6: environment preparation =="
+echo "== colf-manager hardening full package r23: environment preparation =="
 
 required=(VERSION pyproject.toml README.md src/colf_manager/templates/dashboard.html)
 for path in "${required[@]}"; do
   if [[ ! -e "$path" ]]; then
-    echo "ERROR: missing $path; apply r5 over a complete clone." >&2
+    echo "ERROR: missing $path; use the complete r23 package." >&2
     exit 2
   fi
 done
@@ -34,5 +34,5 @@ for package, minimum in checks.items():
     print(f'{package}: {current}')
 PY
 echo
-echo "Dependencies installed for overlay r6."
+echo "Dependencies installed for full package r23."
 echo "Run one command only: scripts/check-all.sh"

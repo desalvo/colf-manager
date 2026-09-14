@@ -1,7 +1,11 @@
+# fmt: off
 import hashlib
 import os
 import secrets
+import zipfile
+from calendar import monthrange
 from datetime import date
+from io import BytesIO
 from decimal import Decimal
 from functools import wraps
 from pathlib import Path
@@ -9,8 +13,8 @@ from uuid import uuid4
 
 from flask import (
     Flask,
-    abort,
     current_app,
+    abort,
     flash,
     jsonify,
     redirect,
@@ -31,20 +35,45 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
-from .calculations import monthly_summary
+from .calculations import (
+    annual_summary,
+    monthly_summary,
+    tfr_year_summary,
+    thirteenth_year_summary,
+    combined_thirteenth_tfr_summary,
+    inps_contribution_summary,
+    estimated_irpef_summary,
+    vacation_balance,
+    vacation_hours_per_day,
+    vacation_working_days,
+)
+from . import __author__, __build__, __version__
+from .backup import create_full_export, restore_full_export
 from .models import (
     Absence,
     AuditLog,
     Document,
+    GeneratedReport,
     Expense,
+    Employer,
     HourlyRate,
+    Location,
     Setting,
     User,
     WorkEntry,
     Worker,
     db,
 )
-from .reporting import payroll_pdf
+from .reporting import (
+    annual_payroll_pdf,
+    courtesy_cu_pdf,
+    payroll_pdf,
+    tfr_annual_pdf,
+    trend_pdf,
+    thirteenth_payroll_pdf,
+    combined_thirteenth_tfr_pdf,
+)
+from .storage import cleanup_orphan_files, safe_unlink, store_report
 from .validation import (
     nonnegative_decimal,
     nonnegative_int,
@@ -140,26 +169,20 @@ def _ensure_legacy_schema_compatibility():
         columns = {c["name"] for c in inspector.get_columns("user")}
         statements = []
         if "is_admin" not in columns:
-            statements.append(
-                'ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE'
-            )
+            statements.append('ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE')
         if "must_change_password" not in columns:
             statements.append(
                 'ALTER TABLE "user" ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT TRUE'
             )
         if "is_active" not in columns:
-            statements.append(
-                'ALTER TABLE "user" ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE'
-            )
+            statements.append('ALTER TABLE "user" ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE')
         if "created_at" not in columns:
             statements.append('ALTER TABLE "user" ADD COLUMN created_at TIMESTAMP')
         for statement in statements:
             db.session.execute(text(statement))
         if statements:
             db.session.commit()
-            db.session.execute(
-                text('UPDATE "user" SET is_admin=TRUE WHERE id=(SELECT MIN(id) FROM "user")')
-            )
+            db.session.execute(text('UPDATE "user" SET is_admin=TRUE WHERE id=(SELECT MIN(id) FROM "user")'))
             db.session.commit()
 
     inspector = inspect(db.engine)
@@ -176,6 +199,48 @@ def _ensure_legacy_schema_compatibility():
             db.session.execute(text(statement))
         if statements:
             db.session.commit()
+
+    inspector = inspect(db.engine)
+    if "worker" in inspector.get_table_names():
+        columns = {c["name"] for c in inspector.get_columns("worker")}
+        statements = []
+        additions = {
+            "employer_id": "INTEGER",
+            "birth_date": "DATE",
+            "address": "TEXT",
+            "phone": "VARCHAR(40)",
+            "email": "VARCHAR(255)",
+            "employment_end": "DATE",
+            "vacation_advance_allowed": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "contract_number": "VARCHAR(100)",
+            "contract_type": "VARCHAR(20) NOT NULL DEFAULT 'permanent'",
+            "employer_covers_all_taxes": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "notes": "TEXT",
+        }
+        for column, ddl in additions.items():
+            if column not in columns:
+                statements.append(f"ALTER TABLE worker ADD COLUMN {column} {ddl}")
+        for statement in statements:
+            db.session.execute(text(statement))
+        if statements:
+            db.session.commit()
+
+    inspector = inspect(db.engine)
+    if "work_entry" in inspector.get_table_names():
+        columns = {c["name"] for c in inspector.get_columns("work_entry")}
+        if "location_id" not in columns:
+            db.session.execute(text("ALTER TABLE work_entry ADD COLUMN location_id INTEGER"))
+            db.session.commit()
+        try:
+            db.session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_work_entry_location_id "
+                    "ON work_entry(location_id)"
+                )
+            )
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
 
     try:
         db.session.execute(
@@ -196,13 +261,9 @@ def create_app(test_config=None):
     admin_password = os.getenv("COLF_MANAGER_ADMIN_PASSWORD")
     if not testing and production:
         if _is_placeholder(secret) or len(secret) < 32:
-            raise RuntimeError(
-                "COLF_MANAGER_SECRET_KEY must be a non-placeholder value of at least 32 characters"
-            )
+            raise RuntimeError("COLF_MANAGER_SECRET_KEY must be a non-placeholder value of at least 32 characters")
         if _is_placeholder(admin_password):
-            raise RuntimeError(
-                "COLF_MANAGER_ADMIN_PASSWORD must be set to a non-placeholder password"
-            )
+            raise RuntimeError("COLF_MANAGER_ADMIN_PASSWORD must be set to a non-placeholder password")
         validate_password(admin_password)
 
     app = Flask(__name__)
@@ -214,8 +275,10 @@ def create_app(test_config=None):
             "DATABASE_URL", f"sqlite:///{data_dir / 'colf-manager.db'}"
         ),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        MAX_CONTENT_LENGTH=int(os.getenv("COLF_MANAGER_MAX_UPLOAD_BYTES", str(16 * 1024 * 1024))),
+        MAX_CONTENT_LENGTH=int(os.getenv("COLF_MANAGER_MAX_BACKUP_BYTES", str(512 * 1024 * 1024))),
+        DOCUMENT_MAX_BYTES=int(os.getenv("COLF_MANAGER_MAX_UPLOAD_BYTES", str(16 * 1024 * 1024))),
         UPLOAD_FOLDER=str(data_dir / "documents"),
+        REPORT_FOLDER=str(data_dir / "reports"),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=_bool_env("COLF_MANAGER_SECURE_COOKIES", production),
@@ -231,6 +294,7 @@ def create_app(test_config=None):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
     Path(app.config["UPLOAD_FOLDER"]).mkdir(parents=True, exist_ok=True)
+    Path(app.config["REPORT_FOLDER"]).mkdir(parents=True, exist_ok=True)
     db.init_app(app)
     Migrate(app, db)
     CSRFProtect(app)
@@ -244,6 +308,14 @@ def create_app(test_config=None):
     login.login_view = "login"
     login.session_protection = "strong"
 
+    @app.context_processor
+    def application_metadata():
+        return {
+            "app_version": __version__,
+            "app_build": __build__,
+            "app_author": __author__,
+        }
+
     @login.user_loader
     def load_user(user_id):
         return db.session.get(User, int(user_id))
@@ -252,9 +324,7 @@ def create_app(test_config=None):
         try:
             db.session.add(
                 AuditLog(
-                    user_id=user_id
-                    if user_id is not None
-                    else (current_user.id if current_user.is_authenticated else None),
+                    user_id=user_id if user_id is not None else (current_user.id if current_user.is_authenticated else None),
                     action=action,
                     object_type=object_type,
                     object_id=str(object_id) if object_id is not None else None,
@@ -291,9 +361,7 @@ def create_app(test_config=None):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault(
-            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
-        )
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; img-src 'self' https://images.unsplash.com data:; "
@@ -307,7 +375,7 @@ def create_app(test_config=None):
 
     @app.get("/healthz")
     def health():
-        return {"status": "ok", "version": "1.0.0"}
+        return {"status": "ok", "version": __version__, "build": __build__}
 
     @app.route("/login", methods=["GET", "POST"])
     @limiter.limit("5 per minute", methods=["POST"])
@@ -315,16 +383,12 @@ def create_app(test_config=None):
         if request.method == "POST":
             username = request.form.get("username", "")[:80]
             user = User.query.filter_by(username=username).first()
-            if (
-                user
-                and user.is_active
-                and check_password_hash(user.password_hash, request.form.get("password", ""))
+            if user and user.is_active and check_password_hash(
+                user.password_hash, request.form.get("password", "")
             ):
                 login_user(user)
                 audit("login", "user", user.id, user_id=user.id)
-                return redirect(
-                    url_for("change_password" if user.must_change_password else "dashboard")
-                )
+                return redirect(url_for("change_password" if user.must_change_password else "dashboard"))
             audit("login_failed", details=f"username={username}")
             flash("Credenziali non valide", "error")
         return render_template("login.html")
@@ -343,9 +407,7 @@ def create_app(test_config=None):
     @login_required
     def change_password():
         if request.method == "POST":
-            if not check_password_hash(
-                current_user.password_hash, request.form.get("current_password", "")
-            ):
+            if not check_password_hash(current_user.password_hash, request.form.get("current_password", "")):
                 flash("Password attuale non valida", "error")
                 return render_template("change_password.html")
             new_password = request.form.get("new_password", "")
@@ -388,68 +450,290 @@ def create_app(test_config=None):
                 flash("Utente creato", "success")
             except (ValueError, IntegrityError) as exc:
                 db.session.rollback()
-                flash(
-                    str(exc) if isinstance(exc, ValueError) else "Nome utente già esistente",
-                    "error",
-                )
+                flash(str(exc) if isinstance(exc, ValueError) else "Nome utente già esistente", "error")
         return render_template("users.html", users=User.query.order_by(User.username).all())
 
     @app.get("/")
     @login_required
     def dashboard():
         today = date.today()
+        year = request.args.get("year", today.year, type=int)
+        month = request.args.get("month", today.month, type=int)
+        if year < 1990 or year > 2200 or month not in range(1, 13):
+            year, month = today.year, today.month
+            flash("Periodo non valido: ripristinato il mese corrente", "error")
         workers = Worker.query.order_by(Worker.last_name).all()
         stats = {"workers": len(workers), "hours": 0, "pay": 0, "tfr": 0}
         for worker in workers:
-            s = get_summary(worker.id, today.year, today.month)
-            stats["hours"] += float(s["worked_hours"])
-            stats["pay"] += float(s["payable"])
-            stats["tfr"] += float(s["tfr_accrual"])
-        recent = WorkEntry.query.order_by(WorkEntry.work_date.desc()).limit(8).all()
-        return render_template(
-            "dashboard.html", workers=workers, stats=stats, recent=recent, today=today
+            summary = get_summary(worker.id, year, month)
+            stats["hours"] += float(summary["worked_hours"])
+            stats["pay"] += float(summary["payable"])
+            stats["tfr"] += float(summary["tfr_accrual"])
+        period_start = date(year, month, 1)
+        period_end = date(year, month, monthrange(year, month)[1])
+        recent = (
+            WorkEntry.query.filter(
+                WorkEntry.work_date >= period_start,
+                WorkEntry.work_date <= period_end,
+            )
+            .order_by(WorkEntry.work_date.desc(), WorkEntry.start_time.desc())
+            .limit(8)
+            .all()
         )
+        return render_template(
+            "dashboard.html",
+            workers=workers,
+            stats=stats,
+            recent=recent,
+            today=today,
+            selected_year=year,
+            selected_month=month,
+        )
+
+    def _optional_date(value, label):
+        return parse_date(value, label) if value else None
+
+    def _worker_from_form(worker=None):
+        worker = worker or Worker()
+        worker.first_name = request.form["first_name"].strip()
+        worker.last_name = request.form["last_name"].strip()
+        if not worker.first_name or not worker.last_name:
+            raise ValueError("Nome e cognome sono obbligatori")
+        employer_id = request.form.get("employer_id", type=int)
+        if employer_id and not db.session.get(Employer, employer_id):
+            raise ValueError("Datore di lavoro non valido")
+        worker.employer_id = employer_id
+        worker.fiscal_code = (request.form.get("fiscal_code") or "").strip() or None
+        worker.birth_date = _optional_date(request.form.get("birth_date"), "Data di nascita")
+        worker.address = (request.form.get("address") or "").strip() or None
+        worker.phone = (request.form.get("phone") or "").strip()[:40] or None
+        worker.email = (request.form.get("email") or "").strip()[:255] or None
+        worker.inps_number = (request.form.get("inps_number") or "").strip() or None
+        worker.contract_number = (request.form.get("contract_number") or "").strip() or None
+        worker.contract_type = request.form.get("contract_type") if request.form.get("contract_type") in {"permanent", "fixed_term"} else "permanent"
+        worker.employer_covers_all_taxes = "employer_covers_all_taxes" in request.form
+        worker.employment_start = parse_date(request.form["employment_start"], "Data assunzione")
+        worker.employment_end = _optional_date(request.form.get("employment_end"), "Data fine rapporto")
+        if worker.employment_end and worker.employment_end < worker.employment_start:
+            raise ValueError("La data di fine rapporto non può precedere l'assunzione")
+        worker.weekly_hours = nonnegative_decimal(request.form.get("weekly_hours"), "Ore settimanali")
+        worker.vacation_advance_allowed = "vacation_advance_allowed" in request.form
+        worker.notes = (request.form.get("notes") or "").strip() or None
+        return worker
 
     @app.route("/workers", methods=["GET", "POST"])
     @login_required
     def workers():
         if request.method == "POST":
             try:
-                w = Worker(
-                    first_name=request.form["first_name"].strip(),
-                    last_name=request.form["last_name"].strip(),
-                    fiscal_code=request.form.get("fiscal_code") or None,
-                    inps_number=request.form.get("inps_number") or None,
-                    employment_start=parse_date(
-                        request.form["employment_start"], "Data assunzione"
-                    ),
-                    weekly_hours=nonnegative_decimal(
-                        request.form.get("weekly_hours"), "Ore settimanali"
-                    ),
-                )
+                w = _worker_from_form()
                 db.session.add(w)
                 db.session.flush()
                 if request.form.get("hourly_rate"):
-                    db.session.add(
-                        HourlyRate(
-                            worker_id=w.id,
-                            valid_from=w.employment_start,
-                            amount=nonnegative_decimal(request.form["hourly_rate"], "Tariffa"),
-                        )
-                    )
+                    db.session.add(HourlyRate(worker_id=w.id, valid_from=w.employment_start, amount=nonnegative_decimal(request.form["hourly_rate"], "Tariffa")))
                 db.session.commit()
                 audit("worker_created", "worker", w.id)
-                flash("Lavoratrice registrata", "success")
-                return redirect(url_for("workers"))
+                flash("Lavoratore registrato", "success")
+                return redirect(url_for("worker_detail", worker_id=w.id))
             except (ValueError, IntegrityError) as exc:
                 db.session.rollback()
-                flash(
-                    str(exc) if isinstance(exc, ValueError) else "Dati duplicati o non validi",
-                    "error",
-                )
+                flash(str(exc) if isinstance(exc, ValueError) else "Dati duplicati o non validi", "error")
+        return render_template("workers.html", workers=Worker.query.order_by(Worker.last_name).all(), employers=Employer.query.order_by(Employer.last_name).all())
+
+    @app.get("/workers/<int:worker_id>")
+    @login_required
+    def worker_detail(worker_id):
+        worker = db.get_or_404(Worker, worker_id)
+        employer = db.session.get(Employer, worker.employer_id) if worker.employer_id else None
+        rates = HourlyRate.query.filter_by(worker_id=worker.id).order_by(HourlyRate.valid_from.desc()).all()
+        absences = Absence.query.filter_by(worker_id=worker.id).all()
+        balances = {year: vacation_balance(worker, absences, year) for year in {date.today().year, worker.employment_start.year}}
+        return render_template("worker_detail.html", worker=worker, employer=employer, rates=rates, balances=balances)
+
+    @app.route("/workers/<int:worker_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def worker_edit(worker_id):
+        worker = db.get_or_404(Worker, worker_id)
+        if request.method == "POST":
+            try:
+                _worker_from_form(worker)
+                db.session.commit()
+                audit("worker_updated", "worker", worker.id)
+                flash("Dati del lavoratore aggiornati", "success")
+                return redirect(url_for("worker_detail", worker_id=worker.id))
+            except (ValueError, IntegrityError) as exc:
+                db.session.rollback()
+                flash(str(exc) if isinstance(exc, ValueError) else "Dati non validi", "error")
+        return render_template("worker_edit.html", worker=worker, employers=Employer.query.order_by(Employer.last_name).all())
+
+    @app.post("/workers/<int:worker_id>/delete")
+    @login_required
+    def worker_delete(worker_id):
+        worker = db.get_or_404(Worker, worker_id)
+        if request.form.get("confirmation") != "DELETE":
+            flash("Digitare DELETE per confermare la cancellazione totale", "error")
+            return redirect(url_for("worker_detail", worker_id=worker.id))
+        documents = Document.query.filter_by(worker_id=worker.id).all()
+        reports = GeneratedReport.query.filter_by(worker_id=worker.id).all()
+        for document in documents:
+            safe_unlink(Path(app.config["UPLOAD_FOLDER"]) / document.stored_name)
+        for report in reports:
+            safe_unlink(Path(app.config["REPORT_FOLDER"]) / report.stored_name)
+        for model in (WorkEntry, Absence, Expense, Document, GeneratedReport, HourlyRate):
+            model.query.filter_by(worker_id=worker.id).delete(synchronize_session=False)
+        db.session.delete(worker)
+        db.session.commit()
+        audit("worker_deleted", "worker", worker_id)
+        flash("Lavoratore e dati collegati eliminati definitivamente", "success")
+        return redirect(url_for("workers"))
+
+    def _employer_from_form(employer=None):
+        employer = employer or Employer()
+        employer.first_name = request.form["first_name"].strip()
+        employer.last_name = request.form["last_name"].strip()
+        if not employer.first_name or not employer.last_name:
+            raise ValueError("Nome e cognome sono obbligatori")
+        employer.fiscal_code = (request.form.get("fiscal_code") or "").strip() or None
+        employer.birth_date = _optional_date(request.form.get("birth_date"), "Data di nascita")
+        employer.address = (request.form.get("address") or "").strip() or None
+        employer.phone = (request.form.get("phone") or "").strip()[:40] or None
+        employer.email = (request.form.get("email") or "").strip()[:255] or None
+        employer.notes = (request.form.get("notes") or "").strip() or None
+        return employer
+
+    @app.route("/employers", methods=["GET", "POST"])
+    @login_required
+    def employers():
+        if request.method == "POST":
+            try:
+                employer = _employer_from_form()
+                db.session.add(employer)
+                db.session.commit()
+                audit("employer_created", "employer", employer.id)
+                flash("Datore di lavoro registrato", "success")
+                return redirect(url_for("employer_detail", employer_id=employer.id))
+            except ValueError as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+        return render_template("employers.html", employers=Employer.query.order_by(Employer.last_name).all())
+
+    @app.get("/employers/<int:employer_id>")
+    @login_required
+    def employer_detail(employer_id):
+        employer = db.get_or_404(Employer, employer_id)
+        return render_template("employer_detail.html", employer=employer, workers=Worker.query.filter_by(employer_id=employer.id).order_by(Worker.last_name).all())
+
+    @app.route("/employers/<int:employer_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def employer_edit(employer_id):
+        employer = db.get_or_404(Employer, employer_id)
+        if request.method == "POST":
+            try:
+                _employer_from_form(employer)
+                db.session.commit()
+                audit("employer_updated", "employer", employer.id)
+                flash("Dati del datore di lavoro aggiornati", "success")
+                return redirect(url_for("employer_detail", employer_id=employer.id))
+            except ValueError as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+        return render_template("employer_edit.html", employer=employer)
+
+    @app.post("/employers/<int:employer_id>/delete")
+    @login_required
+    def employer_delete(employer_id):
+        employer = db.get_or_404(Employer, employer_id)
+        if request.form.get("confirmation") != "DELETE":
+            flash("Digitare DELETE per confermare la cancellazione totale", "error")
+            return redirect(url_for("employer_detail", employer_id=employer.id))
+        Worker.query.filter_by(employer_id=employer.id).update({"employer_id": None}, synchronize_session=False)
+        db.session.delete(employer)
+        db.session.commit()
+        audit("employer_deleted", "employer", employer_id)
+        flash("Datore di lavoro eliminato definitivamente; i lavoratori restano archiviati e non associati", "success")
+        return redirect(url_for("employers"))
+
+    def _location_from_form(location=None):
+        location = location or Location()
+        location.name = (request.form.get("name") or "").strip()[:160]
+        if not location.name:
+            raise ValueError("Il nome del luogo è obbligatorio")
+        location.address = (request.form.get("address") or "").strip() or None
+        location.notes = (request.form.get("notes") or "").strip() or None
+        return location
+
+    @app.route("/locations", methods=["GET", "POST"])
+    @login_required
+    def locations():
+        if request.method == "POST":
+            try:
+                location = _location_from_form()
+                db.session.add(location)
+                db.session.commit()
+                audit("location_created", "location", location.id)
+                flash("Luogo registrato", "success")
+                return redirect(url_for("location_detail", location_id=location.id))
+            except (ValueError, IntegrityError) as exc:
+                db.session.rollback()
+                message = str(exc) if isinstance(exc, ValueError) else "Esiste già un luogo con questo nome"
+                flash(message, "error")
         return render_template(
-            "workers.html", workers=Worker.query.order_by(Worker.last_name).all()
+            "locations.html",
+            locations=Location.query.order_by(Location.name).all(),
         )
+
+    @app.get("/locations/<int:location_id>")
+    @login_required
+    def location_detail(location_id):
+        location = db.get_or_404(Location, location_id)
+        entries = (
+            WorkEntry.query.filter_by(location_id=location.id)
+            .order_by(WorkEntry.work_date.desc(), WorkEntry.start_time.desc())
+            .limit(25)
+            .all()
+        )
+        return render_template(
+            "location_detail.html",
+            location=location,
+            entries=entries,
+            usage_count=WorkEntry.query.filter_by(location_id=location.id).count(),
+        )
+
+    @app.route("/locations/<int:location_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def location_edit(location_id):
+        location = db.get_or_404(Location, location_id)
+        if request.method == "POST":
+            try:
+                _location_from_form(location)
+                db.session.commit()
+                audit("location_updated", "location", location.id)
+                flash("Luogo aggiornato", "success")
+                return redirect(url_for("location_detail", location_id=location.id))
+            except (ValueError, IntegrityError) as exc:
+                db.session.rollback()
+                message = str(exc) if isinstance(exc, ValueError) else "Esiste già un luogo con questo nome"
+                flash(message, "error")
+        return render_template("location_edit.html", location=location)
+
+    @app.post("/locations/<int:location_id>/delete")
+    @login_required
+    def location_delete(location_id):
+        location = db.get_or_404(Location, location_id)
+        if request.form.get("confirmation") != "DELETE":
+            flash("Digitare DELETE per confermare la cancellazione", "error")
+            return redirect(url_for("location_detail", location_id=location.id))
+        WorkEntry.query.filter_by(location_id=location.id).update(
+            {"location_id": None}, synchronize_session=False
+        )
+        db.session.delete(location)
+        db.session.commit()
+        audit("location_deleted", "location", location_id)
+        flash(
+            "Luogo eliminato. Le registrazioni storiche mantengono il nome del luogo usato.",
+            "success",
+        )
+        return redirect(url_for("locations"))
 
     @app.post("/rates")
     @login_required
@@ -467,19 +751,16 @@ def create_app(test_config=None):
             flash("Tariffa aggiornata", "success")
         except (ValueError, IntegrityError) as exc:
             db.session.rollback()
-            flash(
-                str(exc)
-                if isinstance(exc, ValueError)
-                else "Esiste già una tariffa con questa decorrenza",
-                "error",
-            )
+            flash(str(exc) if isinstance(exc, ValueError) else "Esiste già una tariffa con questa decorrenza", "error")
         return redirect(url_for("workers"))
 
     @app.route("/calendar")
     @login_required
     def calendar():
         return render_template(
-            "calendar.html", workers=Worker.query.order_by(Worker.last_name).all()
+            "calendar.html",
+            workers=Worker.query.order_by(Worker.last_name).all(),
+            locations=Location.query.order_by(Location.name).all(),
         )
 
     @app.get("/api/events")
@@ -528,17 +809,29 @@ def create_app(test_config=None):
             end_time = parse_time(payload["end_time"], "Fine")
             break_minutes = nonnegative_int(payload.get("break_minutes", 0), "Pausa")
             validate_work_times(start_time, end_time, break_minutes)
+            location = None
+            location_id = payload.get("location_id")
+            if location_id not in (None, ""):
+                location = db.session.get(Location, int(location_id))
+                if location is None:
+                    raise ValueError("Luogo non valido")
+                location_snapshot = location.name
+                if location.address:
+                    location_snapshot = f"{location.name} — {location.address}"
+            else:
+                location_snapshot = str(payload.get("location") or "").strip()[:255]
+            if not location_snapshot:
+                raise ValueError("Il luogo è obbligatorio")
             entry = WorkEntry(
                 worker_id=int(payload["worker_id"]),
+                location_id=location.id if location else None,
                 work_date=parse_date(payload["work_date"], "Data"),
                 start_time=start_time,
                 end_time=end_time,
                 break_minutes=break_minutes,
-                location=str(payload["location"]).strip()[:255],
+                location=location_snapshot[:255],
                 notes=payload.get("notes") or None,
             )
-            if not entry.location:
-                raise ValueError("Il luogo è obbligatorio")
             db.session.add(entry)
             db.session.commit()
             audit("work_created", "work_entry", entry.id)
@@ -554,14 +847,8 @@ def create_app(test_config=None):
         payload = request.get_json(silent=True) or {}
         try:
             work_date = parse_date(payload.get("work_date", str(e.work_date)), "Data")
-            start_time = (
-                parse_time(payload["start_time"], "Inizio")
-                if payload.get("start_time")
-                else e.start_time
-            )
-            end_time = (
-                parse_time(payload["end_time"], "Fine") if payload.get("end_time") else e.end_time
-            )
+            start_time = parse_time(payload["start_time"], "Inizio") if payload.get("start_time") else e.start_time
+            end_time = parse_time(payload["end_time"], "Fine") if payload.get("end_time") else e.end_time
             validate_work_times(start_time, end_time, e.break_minutes)
             e.work_date, e.start_time, e.end_time = work_date, start_time, end_time
             db.session.commit()
@@ -575,21 +862,27 @@ def create_app(test_config=None):
     @login_required
     def absences():
         try:
+            worker = db.get_or_404(Worker, int(request.form["worker_id"]))
             start_date = parse_date(request.form["start_date"], "Dal")
             end_date = parse_date(request.form["end_date"], "Al")
             if end_date < start_date:
                 raise ValueError("La data finale deve essere successiva o uguale a quella iniziale")
-            absence = Absence(
-                worker_id=int(request.form["worker_id"]),
-                start_date=start_date,
-                end_date=end_date,
-                kind=request.form["kind"],
-                paid="paid" in request.form,
-                paid_hours=nonnegative_decimal(request.form.get("paid_hours"), "Ore pagate"),
-                notes=request.form.get("notes") or None,
-            )
-            if absence.kind not in {"vacation", "sickness", "unpaid_leave"}:
+            kind = request.form["kind"]
+            if kind not in {"vacation", "sickness", "unpaid_leave"}:
                 raise ValueError("Tipo assenza non valido")
+            paid = "paid" in request.form or kind == "vacation"
+            paid_hours_raw = request.form.get("paid_hours")
+            if kind == "vacation" and not paid_hours_raw:
+                paid_hours = Decimal(vacation_working_days(start_date, end_date)) * vacation_hours_per_day(worker)
+            else:
+                paid_hours = nonnegative_decimal(paid_hours_raw, "Ore pagate")
+            absence = Absence(worker_id=worker.id, start_date=start_date, end_date=end_date, kind=kind, paid=paid, paid_hours=paid_hours, notes=request.form.get("notes") or None)
+            if kind == "vacation":
+                existing = Absence.query.filter_by(worker_id=worker.id).all()
+                for year in range(start_date.year, end_date.year + 1):
+                    balance = vacation_balance(worker, existing + [absence], year, min(end_date, date(year, 12, 31)))
+                    if balance["available_usable"] < 0:
+                        raise ValueError(f"Ferie insufficienti per {year}: abilita la fruizione anticipata delle ferie da maturare oppure riduci il periodo")
             db.session.add(absence)
             db.session.commit()
             audit("absence_created", "absence", absence.id)
@@ -643,6 +936,8 @@ def create_app(test_config=None):
                 payload = f.read()
                 if not payload:
                     raise ValueError("Il file è vuoto")
+                if len(payload) > app.config["DOCUMENT_MAX_BYTES"]:
+                    raise ValueError("Il documento supera la dimensione massima consentita")
                 signature_ok = (
                     (suffix == ".pdf" and payload.startswith(b"%PDF-"))
                     or (suffix == ".png" and payload.startswith(b"\x89PNG\r\n\x1a\n"))
@@ -687,18 +982,75 @@ def create_app(test_config=None):
             app.config["UPLOAD_FOLDER"], d.stored_name, as_attachment=True, download_name=d.filename
         )
 
-    def get_summary(worker_id, year, month):
-        if month not in range(1, 13) or year < 2000 or year > 2200:
-            raise ValueError("Periodo non valido")
+    @app.post("/documents/<int:document_id>/delete")
+    @login_required
+    def delete_document(document_id):
+        document = db.get_or_404(Document, document_id)
+        stored_name = document.stored_name
+        db.session.delete(document)
+        db.session.commit()
+        safe_unlink(Path(app.config["UPLOAD_FOLDER"]) / stored_name)
+        audit("document_deleted", "document", document_id)
+        flash("Documento eliminato", "success")
+        return redirect(url_for("documents"))
+
+    def _worker_data(worker_id):
+        worker = db.get_or_404(Worker, worker_id)
+        return (worker,
+                WorkEntry.query.filter_by(worker_id=worker_id).all(),
+                Absence.query.filter_by(worker_id=worker_id).all(),
+                Expense.query.filter_by(worker_id=worker_id).all(),
+                HourlyRate.query.filter_by(worker_id=worker_id).order_by(HourlyRate.valid_from).all())
+
+    def _tfr_factor():
         factor = Setting.query.filter_by(key="tfr_divisor").first()
-        return monthly_summary(
-            WorkEntry.query.filter_by(worker_id=worker_id).all(),
-            Absence.query.filter_by(worker_id=worker_id).all(),
-            Expense.query.filter_by(worker_id=worker_id).all(),
-            HourlyRate.query.filter_by(worker_id=worker_id).order_by(HourlyRate.valid_from).all(),
-            year,
-            month,
-            nonnegative_decimal(factor.value if factor else "13.5", "Divisore TFR"),
+        return nonnegative_decimal(factor.value if factor else "13.5", "Divisore TFR")
+
+    def get_summary(worker_id, year, month):
+        if month not in range(1, 13) or year < 1990 or year > 2200:
+            raise ValueError("Periodo non valido")
+        worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker_id)
+        return monthly_summary(entries, absences_list, expenses_list, rates_list, year, month, _tfr_factor())
+
+    def get_annual(worker_id, year):
+        if year < 1990 or year > 2200:
+            raise ValueError("Anno non valido")
+        worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker_id)
+        return worker, annual_summary(entries, absences_list, expenses_list, rates_list, year, _tfr_factor()), vacation_balance(worker, absences_list, year)
+
+    def _employer_for(worker):
+        return db.session.get(Employer, worker.employer_id) if worker.employer_id else None
+
+    def _rule_notes(year):
+        verified = year in {2025, 2026}
+        prefix = f"Regole {year} verificate nel pacchetto r19 su fonti ufficiali INPS/Agenzia delle Entrate." if verified else f"Formula generale applicata per {year}; verificare eventuali variazioni annuali su INPS, Ministero del Lavoro e Agenzia delle Entrate prima dell'uso ufficiale."
+        return [prefix, "Ferie: 26 giorni lavorativi annui; per servizio inferiore all'anno maturano in dodicesimi e la frazione di mese pari o superiore a 15 giorni vale come mese intero (fonte: INPS, Calcolare contributi, tredicesima e ferie per i lavoratori domestici).", "TFR (rapporti dal 1990): quota dell'anno = retribuzione utile / 13,5. La quota dell'anno corrente non è rivalutata (fonte: INPS, Dimissioni, licenziamento e TFR dei lavoratori domestici; art. 2120 c.c.).", "Quote TFR di anni precedenti: rivalutazione legale 1,5% + 75% dell'incremento dell'indice FOI ISTAT dicembre/dicembre.", "Tredicesima: un dodicesimo della retribuzione annua; nel prospetto viene inclusa come quota maturata stimata nella base utile TFR (fonte: INPS).", "CU di cortesia: il PDF è una certificazione del datore privato non sostituto d'imposta e non il modello CU telematico (fonte: Agenzia delle Entrate, istruzioni dichiarazione precompilata)."]
+
+    def _fiscal_data(worker, summary, year):
+        if not worker.inps_number or not worker.contract_number:
+            return None
+        return {
+            "inps": inps_contribution_summary(worker, summary, year),
+            "taxes": estimated_irpef_summary(worker, summary, year),
+        }
+
+    def _archive_pdf(worker, report_type, filename, buffer, period_start=None, period_end=None):
+        payload = buffer.getvalue() if hasattr(buffer, "getvalue") else buffer.read()
+        report = store_report(
+            app,
+            worker.id if worker else None,
+            report_type,
+            filename,
+            payload,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        audit("report_generated", "generated_report", report.id, report_type)
+        return send_file(
+            BytesIO(payload),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
         )
 
     @app.get("/reports")
@@ -708,18 +1060,23 @@ def create_app(test_config=None):
         worker_id = request.args.get("worker_id", type=int)
         year = request.args.get("year", today.year, type=int)
         month = request.args.get("month", today.month, type=int)
+        summary = annual = vacation = None
         try:
-            summary = get_summary(worker_id, year, month) if worker_id else None
+            if worker_id:
+                summary = get_summary(worker_id, year, month)
+                _, annual, vacation = get_annual(worker_id, year)
         except ValueError as exc:
             flash(str(exc), "error")
-            summary = None
         return render_template(
             "reports.html",
-            workers=Worker.query.all(),
+            workers=Worker.query.order_by(Worker.last_name).all(),
             summary=summary,
+            annual=annual,
+            vacation=vacation,
             selected_worker=worker_id,
             year=year,
             month=month,
+            archived_reports=GeneratedReport.query.order_by(GeneratedReport.created_at.desc()).limit(100).all(),
         )
 
     @app.get("/reports/payroll.pdf")
@@ -728,19 +1085,157 @@ def create_app(test_config=None):
         worker_id = request.args.get("worker_id", type=int)
         year = request.args.get("year", type=int)
         month = request.args.get("month", type=int)
-        if worker_id is None or year is None or month is None:
+        if None in {worker_id, year, month}:
             abort(400)
-        worker = db.get_or_404(Worker, worker_id)
+        worker, _, absences_list, _, _ = _worker_data(worker_id)
         try:
             summary = get_summary(worker_id, year, month)
         except ValueError:
             abort(400)
-        audit("payroll_downloaded", "worker", worker_id, f"{year}-{month:02d}")
-        return send_file(
-            payroll_pdf(worker, summary, year, month),
-            mimetype="application/pdf",
+        vacation=vacation_balance(worker,absences_list,year,min(date.today(),date(year,12,31)))
+        audit("payroll_downloaded","worker",worker_id,f"{year}-{month:02d}")
+        return _archive_pdf(worker, "monthly_payroll", f"cedolino-{year}-{month:02d}.pdf", payroll_pdf(worker,summary,year,month,_employer_for(worker),vacation,_fiscal_data(worker, summary, year)), date(year, month, 1), date(year, month, monthrange(year, month)[1]))
+
+    @app.get("/reports/annual-payroll.pdf")
+    @login_required
+    def annual_payroll():
+        worker_id = request.args.get("worker_id", type=int)
+        year = request.args.get("year", type=int)
+        if worker_id is None or year is None:
+            abort(400)
+        worker,annual,vacation=get_annual(worker_id,year)
+        audit("annual_payroll_downloaded","worker",worker_id,str(year))
+        return _archive_pdf(worker, "annual_payroll", f"cedolino-annuale-{year}.pdf", annual_payroll_pdf(worker,_employer_for(worker),annual,year,vacation,_fiscal_data(worker, annual, year)), date(year, 1, 1), date(year, 12, 31))
+
+    @app.get("/reports/cu-courtesy.pdf")
+    @login_required
+    def courtesy_cu():
+        worker_id = request.args.get("worker_id", type=int)
+        year = request.args.get("year", type=int)
+        if worker_id is None or year is None:
+            abort(400)
+        worker,annual,_=get_annual(worker_id,year)
+        audit("courtesy_cu_downloaded","worker",worker_id,str(year))
+        return _archive_pdf(worker, "courtesy_cu", f"cu-cortesia-{year}.pdf", courtesy_cu_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year)), date(year, 1, 1), date(year, 12, 31))
+
+    @app.get("/reports/tfr.pdf")
+    @login_required
+    def tfr_report():
+        worker_id = request.args.get("worker_id", type=int)
+        year = request.args.get("year", type=int)
+        through_year_end = request.args.get("through_year_end") == "1"
+        if worker_id is None or year is None:
+            abort(400)
+        worker,entries,absences_list,expenses_list,rates_list=_worker_data(worker_id)
+        cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
+        tfr=tfr_year_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff,_tfr_factor())
+        audit("tfr_report_downloaded","worker",worker_id,str(year))
+        return _archive_pdf(worker, "tfr", f"tfr-{year}.pdf", tfr_annual_pdf(worker,_employer_for(worker),tfr,year,_rule_notes(year),_fiscal_data(worker, tfr, year)), date(year, 1, 1), cutoff)
+
+    @app.get("/reports/thirteenth.pdf")
+    @login_required
+    def thirteenth_report():
+        worker_id = request.args.get("worker_id", type=int)
+        year = request.args.get("year", type=int)
+        through_year_end = request.args.get("through_year_end") == "1"
+        if worker_id is None or year is None:
+            abort(400)
+        worker,entries,absences_list,expenses_list,rates_list=_worker_data(worker_id)
+        cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
+        th=thirteenth_year_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff)
+        annual=annual_summary([e for e in entries if e.work_date <= cutoff],[a for a in absences_list if a.start_date <= cutoff],[x for x in expenses_list if x.expense_date <= cutoff],rates_list,year,_tfr_factor())
+        audit("thirteenth_report_downloaded","worker",worker_id,str(year))
+        return _archive_pdf(worker, "thirteenth", f"tredicesima-{year}.pdf", thirteenth_payroll_pdf(worker,_employer_for(worker),th,year,_rule_notes(year),_fiscal_data(worker, annual, year)), date(year, 1, 1), cutoff)
+
+    @app.get("/reports/thirteenth-tfr.pdf")
+    @login_required
+    def thirteenth_tfr_report():
+        worker_id = request.args.get("worker_id", type=int)
+        year = request.args.get("year", type=int)
+        through_year_end = request.args.get("through_year_end") == "1"
+        if worker_id is None or year is None:
+            abort(400)
+        worker,entries,absences_list,expenses_list,rates_list=_worker_data(worker_id)
+        cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
+        combined=combined_thirteenth_tfr_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff,_tfr_factor())
+        audit("thirteenth_tfr_report_downloaded","worker",worker_id,str(year))
+        return _archive_pdf(worker, "thirteenth_tfr", f"tredicesima-tfr-{year}.pdf", combined_thirteenth_tfr_pdf(worker,_employer_for(worker),combined,year,_rule_notes(year)), date(year, 1, 1), cutoff)
+
+    @app.get("/reports/trend.pdf")
+    @login_required
+    def trend_report():
+        worker_id = request.args.get("worker_id", type=int)
+        year = request.args.get("year", type=int)
+        if worker_id is None or year is None:
+            abort(400)
+        worker,annual,_=get_annual(worker_id,year)
+        audit("trend_report_downloaded","worker",worker_id,str(year))
+        return _archive_pdf(worker, "trend", f"andamento-{year}.pdf", trend_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year)), date(year, 1, 1), date(year, 12, 31))
+
+    @app.get("/reports/archive/<int:report_id>")
+    @login_required
+    def download_archived_report(report_id):
+        report = db.get_or_404(GeneratedReport, report_id)
+        audit("report_downloaded", "generated_report", report.id)
+        return send_from_directory(
+            app.config["REPORT_FOLDER"],
+            report.stored_name,
             as_attachment=True,
-            download_name=f"colf-manager-payroll-{year}-{month:02d}.pdf",
+            download_name=report.filename,
+        )
+
+    @app.post("/reports/archive/<int:report_id>/delete")
+    @login_required
+    def delete_archived_report(report_id):
+        report = db.get_or_404(GeneratedReport, report_id)
+        stored_name = report.stored_name
+        db.session.delete(report)
+        db.session.commit()
+        safe_unlink(Path(app.config["REPORT_FOLDER"]) / stored_name)
+        audit("report_deleted", "generated_report", report_id)
+        flash("Report eliminato", "success")
+        return redirect(url_for("reports"))
+
+    @app.route("/admin/archive", methods=["GET", "POST"])
+    @admin_required
+    def archive_admin():
+        cleanup_result = None
+        if request.method == "POST":
+            action = request.form.get("action")
+            if action == "import":
+                upload = request.files.get("archive")
+                confirmation = request.form.get("confirmation")
+                if not upload or not upload.filename:
+                    flash("Selezionare un archivio ZIP", "error")
+                elif confirmation != "IMPORT":
+                    flash("Digitare IMPORT per confermare il ripristino completo", "error")
+                else:
+                    try:
+                        result = restore_full_export(app, upload.stream)
+                        flash(
+                            f"Import completato da {result['source_version']} ({result['source_build']}). Effettuare nuovamente l'accesso.",
+                            "success",
+                        )
+                        return redirect(url_for("login"))
+                    except (ValueError, OSError, zipfile.BadZipFile, SQLAlchemyError) as exc:
+                        db.session.rollback()
+                        flash(f"Import fallito: {exc}", "error")
+            elif action == "cleanup":
+                cleanup_result = cleanup_orphan_files(app, dry_run=False)
+                flash(f"Pulizia completata: {len(cleanup_result['deleted'])} file orfani eliminati", "success")
+        return render_template("archive_admin.html", cleanup_result=cleanup_result)
+
+    @app.get("/admin/archive/export")
+    @admin_required
+    def archive_export():
+        archive = create_full_export(app)
+        audit("full_export_created", "backup", details=archive.name)
+        return send_file(
+            archive,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=archive.name,
+            max_age=0,
         )
 
     return app

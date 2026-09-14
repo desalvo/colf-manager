@@ -26,7 +26,7 @@ Le risorse Kubernetes sono separate per responsabilità. Configurare `secret-dat
 
 ## Uso
 
-Creare la lavoratrice e la tariffa iniziale, inserire le ore dal calendario, registrare ferie/permessi/malattia, inserire spese e documenti e usare la sezione Report per i riepiloghi.
+Creare la lavoratore e la tariffa iniziale, inserire le ore dal calendario, registrare ferie/permessi/malattia, inserire spese e documenti e usare la sezione Report per i riepiloghi.
 
 ## TFR e adempimenti
 
@@ -40,6 +40,38 @@ I dati sono personali e possono includere informazioni sanitarie. Limitare gli a
 
 `scripts/release-check.sh` esegue lint, test/copertura, Bandit, audit dipendenze, manuali IT/EN, wheel/sdist, `twine check`, SBOM CycloneDX e verifica pacchetto. La CI usa Python 3.11-3.13, Gitleaks, CodeQL, Trivy e validazione Docker/Kubernetes.
 
+## Anagrafiche e cancellazione
+
+Lavoratori e datori di lavoro possono essere inseriti, visualizzati, modificati e cancellati definitivamente. Indirizzo, telefono ed e-mail sono opzionali. La cancellazione totale di un lavoratore elimina anche ore, assenze, tariffe, spese e documenti associati; la cancellazione di un datore scollega i lavoratori ma non li elimina.
+
+## Ferie automatiche
+
+Il motore usa 26 giorni lavorativi annui e la maturazione in dodicesimi. Una frazione di servizio pari o superiore a 15 giorni nel mese vale come mese intero. Il conteggio ferie considera dal lunedì al sabato ed esclude domeniche e festività nazionali; la festività del patrono locale va verificata separatamente. Per i rapporti a ore, il valore orario di una giornata di ferie usa le ore medie mensili divise per 26. Per ogni lavoratore si può abilitare l'uso anticipato delle ferie che matureranno entro il 31 dicembre.
+
+## TFR e report annuali
+
+Per rapporti dal 1990, il prospetto TFR usa la retribuzione utile registrata, include la quota di tredicesima stimata e divide per 13,5. La quota maturata nell'anno non viene rivalutata; le quote pregresse rimaste accantonate richiedono la rivalutazione prevista dall'art. 2120 c.c. (1,5% fisso più 75% dell'aumento FOI ISTAT). Sono disponibili PDF per cedolino mensile, cedolino globale annuale, certificazione/CU di cortesia, TFR annuale e andamento mensile di ore e retribuzioni. Le regole 2025 e 2026 sono marcate come verificate nel pacchetto; per altri anni il report richiede esplicitamente una verifica delle fonti ufficiali.
+
+## CU di cortesia
+
+Il datore di lavoro domestico privato non è normalmente un sostituto d'imposta. Il documento prodotto è quindi una certificazione di cortesia delle retribuzioni registrate e non il modello CU telematico trasmesso all'Agenzia delle Entrate.
+
 ## Limiti
 
 Il software non sostituisce un consulente del lavoro, non effettua versamenti o comunicazioni e non certifica la correttezza legale dei parametri inseriti.
+
+## Tredicesima, TFR e contribuzione
+
+La sezione Report genera anche il cedolino specifico della tredicesima e un prospetto cumulativo tredicesima + TFR, con formula, periodo di riferimento e note sulle regole applicate. Se nell'anagrafica del lavoratore sono presenti posizione INPS e numero contratto, i PDF includono la stima dei contributi INPS e, separatamente, una stima IRPEF informativa. L'opzione "datore si fa carico di tutte le tasse" azzera nei prospetti la quota economica residua attribuita al lavoratore, senza trasformare il datore domestico in sostituto d'imposta.
+
+
+## Luoghi
+
+La voce **Luoghi** permette di aggiungere, visualizzare, modificare e cancellare i luoghi utilizzati per il lavoro. Ogni luogo può avere un nome, un indirizzo opzionale e note. Nel calendario le nuove ore vengono associate a uno dei luoghi registrati. Per preservare lo storico, ogni registrazione conserva anche una copia testuale del luogo: modificare o cancellare l'anagrafica di un luogo non modifica le ore già registrate.
+
+
+## Archivio, report e backup completo
+
+I report PDF generati vengono conservati nell'applicazione sul volume persistente e possono essere riscaricati o cancellati manualmente. Anche i documenti caricati possono essere cancellati manualmente. Gli amministratori dispongono di un export ZIP completo di database, documenti referenziati e report archiviati e di un import completo con conferma esplicita. I file presenti sul volume ma non più referenziati dal database vengono eliminati automaticamente dal servizio di manutenzione dopo la retention configurata.
+
+La Panoramica può essere consultata scegliendo mese e anno. Il calendario consente di navigare nei mesi precedenti e registrare retroattivamente le ore nel periodo visualizzato.

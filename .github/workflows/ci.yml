@@ -92,6 +92,7 @@ jobs:
             /work/kubernetes/database.yaml \
             /work/kubernetes/application.yaml \
             /work/kubernetes/backup.yaml \
+            /work/kubernetes/maintenance.yaml \
             /work/kubernetes/network-policy.yaml \
             /work/kubernetes/ingress.yaml
 

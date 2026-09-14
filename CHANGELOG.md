@@ -25,3 +25,12 @@
 - Independent workload and storage deletion scripts.
 - Updated kubeconform CI validation for split manifests.
 - Production gate evidence updated to r13-full.
+
+## r14-full - 2026-09-14
+
+- Fixed concurrent database bootstrap under multi-worker Gunicorn.
+- PostgreSQL schema/bootstrap is serialized with an application-specific advisory lock.
+- `create_all`, legacy compatibility updates and initial admin creation now run inside the serialized bootstrap section.
+- Prevents concurrent `CREATE TABLE "user"` and `pg_type_typname_nsp_index` duplicate-key failures on fresh Docker/Podman/Kubernetes starts.
+- Full self-contained repository package.
+

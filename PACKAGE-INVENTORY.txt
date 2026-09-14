@@ -4,6 +4,11 @@
 .github/workflows/codeql.yml
 .github/workflows/release.yml
 .gitignore
+.pytest_cache/.gitignore
+.pytest_cache/CACHEDIR.TAG
+.pytest_cache/README.md
+.pytest_cache/v/cache/lastfailed
+.pytest_cache/v/cache/nodeids
 APPLY.md
 CHANGELOG.md
 Dockerfile

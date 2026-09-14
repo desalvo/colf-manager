@@ -10,6 +10,7 @@ from uuid import uuid4
 from flask import (
     Flask,
     abort,
+    current_app,
     flash,
     jsonify,
     redirect,
@@ -71,6 +72,57 @@ def _bool_env(name, default=False):
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Stable, application-specific PostgreSQL advisory lock key. The lock is
+# session scoped and therefore also serializes bootstrap across replicas.
+DATABASE_BOOTSTRAP_LOCK_ID = 1129270342
+
+
+def _initialize_database(admin_password, testing):
+    """Serialize schema/bootstrap work across Gunicorn workers."""
+    lock_connection = None
+    try:
+        if db.engine.dialect.name == "postgresql":
+            lock_connection = db.engine.connect()
+            lock_connection.execute(
+                text("SELECT pg_advisory_lock(:lock_id)"),
+                {"lock_id": DATABASE_BOOTSTRAP_LOCK_ID},
+            )
+
+        db.metadata.create_all(bind=lock_connection or db.engine)
+        _ensure_legacy_schema_compatibility()
+
+        if not User.query.first():
+            password = (
+                admin_password
+                or current_app.config.get("TEST_ADMIN_PASSWORD")
+                or secrets.token_urlsafe(24)
+            )
+            if not testing:
+                validate_password(password)
+            db.session.add(
+                User(
+                    username=os.getenv("COLF_MANAGER_ADMIN_USER", "admin"),
+                    password_hash=generate_password_hash(password),
+                    is_admin=True,
+                    must_change_password=not testing,
+                )
+            )
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    finally:
+        db.session.remove()
+        if lock_connection is not None:
+            try:
+                lock_connection.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": DATABASE_BOOTSTRAP_LOCK_ID},
+                )
+            finally:
+                lock_connection.close()
 
 
 def _ensure_legacy_schema_compatibility():
@@ -243,23 +295,7 @@ def create_app(test_config=None):
         return response
 
     with app.app_context():
-        db.create_all()
-        _ensure_legacy_schema_compatibility()
-        if not User.query.first():
-            password = (
-                admin_password or app.config.get("TEST_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
-            )
-            if not testing:
-                validate_password(password)
-            db.session.add(
-                User(
-                    username=os.getenv("COLF_MANAGER_ADMIN_USER", "admin"),
-                    password_hash=generate_password_hash(password),
-                    is_admin=True,
-                    must_change_password=not testing,
-                )
-            )
-            db.session.commit()
+        _initialize_database(admin_password, testing)
 
     @app.get("/healthz")
     def health():

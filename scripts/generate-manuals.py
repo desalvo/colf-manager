@@ -16,26 +16,19 @@ LOGO = ROOT / "src" / "colf_manager" / "static" / "logo.png"
 OUT.mkdir(parents=True, exist_ok=True)
 
 
-def cover_logo():
-    """Large, unmistakable cover logo matching the web application mark."""
-    logo = Image(str(LOGO), width=32 * mm, height=32 * mm)
-    logo.hAlign = "LEFT"
-    return logo
-
-
 def header_footer(canvas, doc):
     canvas.saveState()
     canvas.setFillColor(colors.HexColor("#173f3a"))
     canvas.rect(0, A4[1] - 23 * mm, A4[0], 23 * mm, fill=1, stroke=0)
-    logo_x, logo_y, logo_s = 18 * mm, A4[1] - 19 * mm, 12 * mm
-    canvas.drawImage(ImageReader(str(LOGO)), logo_x, logo_y, logo_s, logo_s, mask="auto")
+    canvas.drawImage(
+        ImageReader(str(LOGO)), 18 * mm, A4[1] - 19 * mm, 12 * mm, 12 * mm, mask="auto"
+    )
     canvas.setFillColor(colors.HexColor("#f7f1e8"))
     canvas.setFont("Helvetica-Bold", 13)
     canvas.drawString(33 * mm, A4[1] - 14 * mm, "colf-manager")
     canvas.setFont("Helvetica", 8)
     canvas.drawRightString(A4[0] - 18 * mm, A4[1] - 14 * mm, "1.0.0 · Alessandro De Salvo")
     canvas.setFillColor(colors.HexColor("#667873"))
-    canvas.drawString(18 * mm, 11 * mm, "EUPL-1.2 · braket71@gmail.com")
     canvas.drawRightString(A4[0] - 18 * mm, 11 * mm, str(doc.page))
     canvas.restoreState()
 
@@ -86,7 +79,6 @@ def build(lang):
             leftIndent=5 * mm,
             firstLineIndent=-3 * mm,
             bulletIndent=0,
-            spaceAfter=0.6 * mm,
         )
     )
     doc = BaseDocTemplate(
@@ -96,8 +88,6 @@ def build(lang):
         rightMargin=18 * mm,
         topMargin=31 * mm,
         bottomMargin=20 * mm,
-        title=f"colf-manager 1.0.0 {lang}",
-        author="Alessandro De Salvo",
     )
     doc.addPageTemplates(
         PageTemplate(
@@ -114,8 +104,9 @@ def build(lang):
             continue
         clean = re.sub(r"`([^`]+)`", r"<font name='Courier'>\1</font>", line)
         if line.startswith("# "):
-            story.extend([cover_logo(), Spacer(1, 2 * mm)])
-            story.append(Paragraph(clean[2:], styles["CMTitle"]))
+            img = Image(str(LOGO), width=32 * mm, height=32 * mm)
+            img.hAlign = "LEFT"
+            story.extend([img, Spacer(1, 2 * mm), Paragraph(clean[2:], styles["CMTitle"])])
         elif line.startswith("## "):
             story.append(Paragraph(clean[3:], styles["CMH2"]))
         elif line.startswith("- "):

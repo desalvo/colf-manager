@@ -15,3 +15,13 @@
 - Production gate now fails early with the installed Twine version before validating distributions.
 
 - r6: Flask-Limiter 4.1.1+ resolves Rich/Twine 7 dependency conflict; clean-venv verification flow.
+
+## r13-full - 2026-09-14
+
+- Full self-contained repository package (no incremental overlay dependency).
+- Split Kubernetes application and database workloads.
+- Split application and database Secrets.
+- Split application PVC from PostgreSQL/backup PVCs.
+- Independent workload and storage deletion scripts.
+- Updated kubeconform CI validation for split manifests.
+- Production gate evidence updated to r13-full.

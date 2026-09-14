@@ -6,8 +6,10 @@ Trust boundaries: HTTPS ingress, application session, database credentials and a
 
 Key entities: `Worker` owns `HourlyRate`, `WorkEntry`, `Absence`, `Expense` and `Document`. A rate is selected by the latest `valid_from` date not after a work/absence date. Monetary arithmetic uses `Decimal` and rounds to cents only at summarized boundaries.
 
+## Kubernetes layout
+
+Application workload, PostgreSQL workload, application PVCs, database/backup PVCs and application/database Secrets are deliberately kept in separate manifests. Removing a workload never removes its storage. Application storage can be destroyed independently from PostgreSQL storage.
+
 ## Delivery pipeline
 
 Pull requests and `main` run tests on Python 3.11-3.13, security and dependency audits, container scanning, and Docker Compose/Kubernetes validation on GitHub-hosted `ubuntu-24.04` runners. A successful `main` pipeline publishes the multi-architecture image `desalvo/colf-manager:latest`. A signed `vX.Y.Z` tag matching `VERSION` publishes only `desalvo/colf-manager:X.Y.Z`, creates an SBOM and provenance attestations, and uploads the generated release artifacts to GitHub.
-
-Docker Hub credentials are stored as `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets. The ASCII-armored release signing public key is stored as `RELEASE_GPG_PUBLIC_KEY`; private signing keys never enter GitHub Actions.

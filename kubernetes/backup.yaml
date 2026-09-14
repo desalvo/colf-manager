@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: colf-manager
+spec:
+  schedule: "17 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: colf-manager-postgres-backup
+            app.kubernetes.io/name: colf-manager
+            app.kubernetes.io/component: database-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: postgres:17-alpine
+              env:
+                - name: PGHOST
+                  value: postgres
+                - name: PGDATABASE
+                  value: colf_manager
+                - name: PGUSER
+                  value: colf_manager
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: colf-manager-database
+                      key: postgres-password
+              command: [sh, -ec]
+              args:
+                - >-
+                  umask 077;
+                  pg_dump -Fc -f "/backup/colf-manager-$(date +%Y%m%d-%H%M%S).dump";
+                  find /backup -type f -name "*.dump" -mtime +14 -delete
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+                readOnlyRootFilesystem: true
+          volumes:
+            - name: backup
+              persistentVolumeClaim:
+                claimName: backup-data

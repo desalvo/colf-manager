@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-only-from-app-and-backup
+  namespace: colf-manager
+spec:
+  podSelector:
+    matchLabels:
+      app: colf-manager-postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: colf-manager
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              app: colf-manager-postgres-backup
+      ports:
+        - protocol: TCP
+          port: 5432

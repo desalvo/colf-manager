@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: colf-manager
+  namespace: colf-manager
+  labels:
+    app.kubernetes.io/name: colf-manager
+    app.kubernetes.io/component: application
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: colf-manager
+  template:
+    metadata:
+      labels:
+        app: colf-manager
+        app.kubernetes.io/name: colf-manager
+        app.kubernetes.io/component: application
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 1000
+      containers:
+        - name: app
+          image: desalvo/colf-manager:latest
+          imagePullPolicy: Always
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: colf-manager-database
+                  key: postgres-password
+            - name: DATABASE_URL
+              value: postgresql+psycopg://colf_manager:$(POSTGRES_PASSWORD)@postgres/colf_manager
+            - name: COLF_MANAGER_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: colf-manager-application
+                  key: app-secret
+            - name: COLF_MANAGER_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: colf-manager-application
+                  key: admin-password
+            - name: COLF_MANAGER_PRODUCTION
+              value: "1"
+            - name: COLF_MANAGER_SECURE_COOKIES
+              value: "1"
+            - name: COLF_MANAGER_PROXY_FIX
+              value: "1"
+            - name: COLF_MANAGER_SESSION_MINUTES
+              value: "60"
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: app-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: colf-manager
+  namespace: colf-manager
+spec:
+  selector:
+    app: colf-manager
+  ports:
+    - port: 80
+      targetPort: 8000

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-data
+  namespace: colf-manager
+  labels:
+    app.kubernetes.io/name: colf-manager
+    app.kubernetes.io/component: application-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName: YOUR_STORAGE_CLASS

@@ -32,7 +32,7 @@ All later schema changes should use reviewed Alembic revisions and `flask db upg
 
 ## Kubernetes
 
-`kubernetes/colf-manager.yaml` includes TLS ingress, security contexts, resource limits, application/database/backup PVCs, PostgreSQL ingress restriction and a daily `pg_dump` CronJob with 14-day local retention. Replace all `CHANGE_ME` values and configure host, ingress class, TLS secret and optional `storageClassName` before deployment. See `kubernetes/README.md`.
+Kubernetes resources are split into independent application, database, PVC, Secret, backup, NetworkPolicy and Ingress manifests. Deleting the application or database workload does not delete its PVCs, and the application PVC can be removed independently from PostgreSQL storage. Configure the two Secret manifests and storage settings before deployment. See `kubernetes/README.md`.
 
 ## Quality and release
 

@@ -32,7 +32,7 @@ Le modifiche schema successive devono usare migrazioni Alembic revisionate e `fl
 
 ## Kubernetes
 
-Il manifest `kubernetes/colf-manager.yaml` include TLS Ingress, security context, limiti risorse, PVC applicazione/database/backup, NetworkPolicy sul PostgreSQL e backup `pg_dump` giornaliero con retention locale di 14 giorni. Prima del deploy sostituire i `CHANGE_ME`, configurare host/Ingress class/TLS secret e, se necessario, `storageClassName`. Vedi `kubernetes/README.md`.
+Le risorse Kubernetes sono separate in manifest indipendenti per applicazione, database, PVC, Secret, backup, NetworkPolicy e Ingress. Eliminare il workload applicativo o PostgreSQL non elimina i PVC; il PVC applicativo può essere cancellato senza toccare i dati del database. Configurare i due Secret e lo storage prima del deploy. Vedi `kubernetes/README.it.md`.
 
 ## Qualità e release
 

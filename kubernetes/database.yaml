@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: colf-manager
+  labels:
+    app.kubernetes.io/name: colf-manager
+    app.kubernetes.io/component: database
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: colf-manager-postgres
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: colf-manager-postgres
+        app.kubernetes.io/name: colf-manager
+        app.kubernetes.io/component: database
+    spec:
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          env:
+            - name: POSTGRES_DB
+              value: colf_manager
+            - name: POSTGRES_USER
+              value: colf_manager
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: colf-manager-database
+                  key: postgres-password
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, colf_manager]
+            initialDelaySeconds: 8
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: [pg_isready, -U, colf_manager]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: colf-manager
+spec:
+  selector:
+    app: colf-manager-postgres
+  ports:
+    - port: 5432

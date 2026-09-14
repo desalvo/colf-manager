@@ -2,10 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager hardening overlay r10: production gate =="
+echo "== colf-manager full package r13: production gate =="
 
-# Local runs should use the project virtualenv; GitHub Actions uses
-# actions/setup-python and therefore has no VIRTUAL_ENV by design.
 if [[ "${GITHUB_ACTIONS:-}" != "true" && -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: activate .venv first for local execution." >&2
   exit 2
@@ -23,17 +21,15 @@ pytest
 bandit -q -r src -x tests
 pip-audit .
 
-env \
-  POSTGRES_PASSWORD='validation-only-postgres-password' \
-  COLF_MANAGER_SECRET_KEY='validation-only-secret-key-0123456789abcdef0123456789abcdef' \
-  COLF_MANAGER_ADMIN_PASSWORD='Validation-admin-password-1234' \
-  docker compose config --quiet
+env   POSTGRES_PASSWORD='validation-only-postgres-password'   COLF_MANAGER_SECRET_KEY='validation-only-secret-key-0123456789abcdef0123456789abcdef'   COLF_MANAGER_ADMIN_PASSWORD='Validation-admin-password-1234'   docker compose config --quiet
 
-COLF_MANAGER_PRODUCTION=0 COLF_MANAGER_DATA="$(mktemp -d)" \
-  flask --app colf_manager.app:create_app db heads
+COLF_MANAGER_PRODUCTION=0 COLF_MANAGER_DATA="$(mktemp -d)"   flask --app colf_manager.app:create_app db heads
 
 python scripts/generate-manuals.py
+
+rm -rf dist build
 python -m build
+
 python - <<'PY'
 from importlib.metadata import version
 from packaging.version import Version
@@ -55,7 +51,17 @@ from pypdf import PdfReader
 required = [
     Path("Dockerfile"),
     Path("docker-compose.yml"),
-    Path("kubernetes/colf-manager.yaml"),
+    Path("kubernetes/namespace.yaml"),
+    Path("kubernetes/secret-database.yaml"),
+    Path("kubernetes/secret-application.yaml"),
+    Path("kubernetes/pvc-database.yaml"),
+    Path("kubernetes/pvc-application.yaml"),
+    Path("kubernetes/database.yaml"),
+    Path("kubernetes/application.yaml"),
+    Path("kubernetes/backup.yaml"),
+    Path("kubernetes/network-policy.yaml"),
+    Path("kubernetes/ingress.yaml"),
+    Path("kubernetes/kustomization.yaml"),
     Path("SECURITY.md"),
     Path("LICENSE"),
     Path("output/pdf/colf-manager-manual-v1.0.0-it.pdf"),
@@ -69,13 +75,20 @@ missing = [str(path) for path in required if not path.is_file() or path.stat().s
 if missing:
     raise SystemExit(f"Missing production artifacts: {missing}")
 
-pages = {str(path): len(PdfReader(path).pages) for path in required if path.suffix == ".pdf"}
+if Path("kubernetes/colf-manager.yaml").exists():
+    raise SystemExit("Obsolete kubernetes/colf-manager.yaml must be removed")
+
+pages = {
+    str(path): len(PdfReader(path).pages)
+    for path in required
+    if path.suffix == ".pdf"
+}
 if any(count < 2 for count in pages.values()):
     raise SystemExit(f"Incomplete manuals: {pages}")
 
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r10",
+    "overlay_revision": "r13-full",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -92,12 +105,15 @@ evidence = {
         "build",
         "twine",
         "sbom",
+        "split-kubernetes-artifacts",
         "artifacts",
     ],
 }
 
 Path("dist").mkdir(exist_ok=True)
-Path("dist/production-evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
+Path("dist/production-evidence.json").write_text(
+    json.dumps(evidence, indent=2) + "\n"
+)
 PY
 
-echo "Production gate r10 passed."
+echo "Production gate r13 full passed."

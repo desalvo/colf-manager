@@ -1,3 +1,5 @@
-# Security policy
+# Security Policy
 
-Report vulnerabilities privately to braket71@gmail.com. Do not include real worker records. Supported release: 1.0.x. Rotate application, database and initial admin secrets before production; terminate TLS at a trusted ingress/reverse proxy; restrict database and backup access.
+Please do not publish secrets, personal data or exploitable vulnerability details in public issues.
+
+Report security issues privately to the project maintainer. Keep dependencies and container images updated, use HTTPS in production, protect backups and rotate compromised credentials immediately.

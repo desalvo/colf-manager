@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: colf-manager
+  namespace: colf-manager
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - colf-manager.example.it
+      secretName: colf-manager-tls
+  rules:
+    - host: colf-manager.example.it
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: colf-manager
+                port:
+                  number: 80

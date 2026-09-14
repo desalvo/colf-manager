@@ -5,36 +5,48 @@ on:
   workflow_dispatch: {}
 permissions: {contents: read}
 concurrency: {group: "ci-${{ github.ref }}", cancel-in-progress: true}
+
 jobs:
   test:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    strategy: {fail-fast: false, matrix: {python-version: ['3.11', '3.12', '3.13']}}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with: {python-version: '${{ matrix.python-version }}', cache: pip}
+        with:
+          python-version: '${{ matrix.python-version }}'
+          cache: pip
       - run: python -m pip install --upgrade pip
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
       - run: pytest
+
   security:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-        with: {persist-credentials: false}
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v6
-        with: {python-version: '3.13', cache: pip}
+        with:
+          python-version: '3.13'
+          cache: pip
       - run: pip install -e '.[dev]'
       - name: Static Python security scan
         run: bandit -q -r src -x tests
       - name: Python dependency vulnerability audit
         run: pip-audit .
       - uses: gitleaks/gitleaks-action@v2
-        env: {GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'}
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+
   manifests:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -69,7 +81,20 @@ jobs:
           scanners: vuln
           vuln-type: os
       - name: Validate Kubernetes schemas
-        run: docker run --rm -v "$PWD:/work" ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary /work/kubernetes/colf-manager.yaml
+        run: |
+          docker run --rm -v "$PWD:/work" ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary \
+            /work/kubernetes/namespace.yaml \
+            /work/kubernetes/secret-database.yaml \
+            /work/kubernetes/secret-application.yaml \
+            /work/kubernetes/pvc-database.yaml \
+            /work/kubernetes/pvc-application.yaml \
+            /work/kubernetes/database.yaml \
+            /work/kubernetes/application.yaml \
+            /work/kubernetes/backup.yaml \
+            /work/kubernetes/network-policy.yaml \
+            /work/kubernetes/ingress.yaml
+
   production-gate:
     needs: [test, security, manifests]
     runs-on: ubuntu-24.04
@@ -77,11 +102,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
-        with: {python-version: '3.13', cache: pip}
+        with:
+          python-version: '3.13'
+          cache: pip
       - run: pip install -e '.[dev]'
       - run: scripts/production-gate.sh
       - uses: actions/upload-artifact@v4
-        with: {name: production-evidence, path: 'dist/production-evidence.json', if-no-files-found: error}
+        with:
+          name: production-evidence
+          path: dist/production-evidence.json
+          if-no-files-found: error
+
   publish-latest:
     name: Publish Docker latest
     needs: [production-gate]

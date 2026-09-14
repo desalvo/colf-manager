@@ -1,28 +1,32 @@
-# colf-manager production gate overlay r10
+# colf-manager r13 full package
 
-Questa revisione corregge il fallimento del job GitHub Actions `production-gate`.
+This archive is a complete repository snapshot. It is not an incremental patch and does not depend on any previous rN overlay.
 
-Causa:
-`scripts/production-gate.sh` richiedeva sempre `VIRTUAL_ENV`, ma GitHub Actions
-usa `actions/setup-python`, che non imposta `VIRTUAL_ENV`.
+## Replace an existing clone
 
-Comportamento r10:
-- locale: richiede ancora `.venv` attivo;
-- GitHub Actions: accetta `GITHUB_ACTIONS=true`;
-- marker/evidence aggiornati a r10.
+Keep the `.git` directory, then replace the working tree contents with the contents of the `colf-manager/` directory from this archive.
 
-Applicazione:
+Recommended safe procedure:
 
 ```bash
 cd /root/colf-manager
-unzip -o /percorso/colf-manager-production-gate-r10.zip
+git status
+# ensure local changes are committed/stashed first
 
-git diff -- scripts/production-gate.sh
+rsync -a --delete --exclude .git /path/to/extracted/colf-manager/ ./
 
 source .venv/bin/activate
 scripts/production-gate.sh
 
-git add scripts/production-gate.sh
-git commit -m "Fix production gate on GitHub Actions"
+git status
+git diff
+git add -A
+git commit -m "Install full r13 package with split Kubernetes resources"
 git push origin main
+```
+
+Expected final gate line:
+
+```text
+Production gate r13 full passed.
 ```

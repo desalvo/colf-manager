@@ -122,3 +122,11 @@
 - Adopt the PostgreSQL 18 official-image storage layout by mounting the persistent volume at `/var/lib/postgresql`.
 - Keep the Alpine `postgres` UID/GID 70 security context for the database and backup workloads.
 - Add explicit PostgreSQL 17 → 18 major-upgrade guidance for existing Docker/Podman and Kubernetes installations.
+
+## r26-full - 2026-09-14
+
+- Pin the application image user/group to UID/GID 10001 and declare `USER 10001:10001`.
+- Set Kubernetes application and maintenance workloads to explicit numeric `runAsUser`/`runAsGroup` 10001.
+- Set `fsGroup: 10001` with `fsGroupChangePolicy: OnRootMismatch` for the shared application data PVC.
+- Fix kubelet startup rejection when `runAsNonRoot` is enabled and the image declares the named `colf-manager` user.
+- Mount ephemeral `/tmp` volumes for application and maintenance workloads while keeping `readOnlyRootFilesystem: true`.

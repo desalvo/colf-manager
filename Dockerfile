@@ -23,8 +23,8 @@ RUN apt-get update \
     && apt-get -y upgrade \
     && rm -rf /var/lib/apt/lists/*
 
-RUN groupadd -r colf-manager \
-    && useradd -r -g colf-manager -d /app colf-manager
+RUN groupadd --gid 10001 colf-manager \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /app --shell /usr/sbin/nologin colf-manager
 
 WORKDIR /app
 
@@ -37,7 +37,7 @@ RUN python -m pip install --no-cache-dir /wheels/* \
 
 RUN mkdir -p /data && chown colf-manager:colf-manager /data
 
-USER colf-manager
+USER 10001:10001
 
 ENV COLF_MANAGER_DATA=/data \
     COLF_MANAGER_PRODUCTION=1 \

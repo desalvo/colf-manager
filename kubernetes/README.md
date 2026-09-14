@@ -103,6 +103,16 @@ Database Secret only:
 kubectl delete -f kubernetes/secret-database.yaml
 ```
 
+
+## Application security context
+
+The `desalvo/colf-manager` image deterministically uses the non-root
+`colf-manager` account with UID/GID 10001. The application Deployment and
+maintenance CronJob therefore explicitly set `runAsUser: 10001`,
+`runAsGroup: 10001`, and `fsGroup: 10001`. This avoids the kubelet rejection
+`image has non-numeric user, cannot verify user is non-root` while preserving
+`runAsNonRoot: true`, `allowPrivilegeEscalation: false`, and `capabilities.drop: [ALL]`.
+
 ## PostgreSQL security context
 
 The `postgres:18.6-alpine` image uses the Alpine `postgres` account (UID/GID 70).
@@ -111,7 +121,7 @@ The database Pod therefore runs explicitly as UID/GID 70 and uses `fsGroup: 70`.
 create its Unix socket without requiring `chown`/`chmod` capabilities. The container
 keeps `allowPrivilegeEscalation: false` and drops all Linux capabilities.
 
-For a fresh r25 installation this security context is ready for PostgreSQL 18.6.
+For a fresh r26 installation this security context is ready for PostgreSQL 18.6.
 If the existing PVC contains a PostgreSQL 17 cluster, do **not** simply apply the PostgreSQL
 18 workload to that PVC. Perform the supported 17 → 18 major-version migration described in
 `POSTGRESQL-18-UPGRADE.md`, preferably restoring into a fresh PostgreSQL 18 PVC.

@@ -103,6 +103,16 @@ kubectl delete -f kubernetes/secret-database.yaml
 > `kubectl delete -k kubernetes` elimina intenzionalmente l'intero stack,
 > compresi tutti i PVC.
 
+
+## Security context applicazione
+
+L'immagine `desalvo/colf-manager` usa in modo deterministico l'utente non-root
+`colf-manager` con UID/GID 10001. Il Deployment applicativo e il CronJob di
+manutenzione impostano quindi esplicitamente `runAsUser: 10001`,
+`runAsGroup: 10001` e `fsGroup: 10001`. Questo evita il rifiuto kubelet
+`image has non-numeric user, cannot verify user is non-root` mantenendo
+`runAsNonRoot: true`, `allowPrivilegeEscalation: false` e `capabilities.drop: [ALL]`.
+
 ## Security context PostgreSQL
 
 L'immagine `postgres:18.6-alpine` usa l'account Alpine `postgres` con UID/GID 70.
@@ -111,7 +121,7 @@ Il Pod database viene quindi eseguito esplicitamente con UID/GID 70 e `fsGroup: 
 socket Unix senza richiedere capability `chown`/`chmod`. Il container mantiene
 `allowPrivilegeEscalation: false` e continua a rimuovere tutte le capability Linux.
 
-Per una nuova installazione r25 questo security context è pronto per PostgreSQL 18.6.
+Per una nuova installazione r26 questo security context è pronto per PostgreSQL 18.6.
 Se il PVC esistente contiene un cluster PostgreSQL 17, **non** applicare semplicemente il workload
 PostgreSQL 18 su quel PVC. Eseguire la migrazione major 17 → 18 descritta in
 `POSTGRESQL-18-UPGRADE.it.md`, preferibilmente ripristinando su un nuovo PVC PostgreSQL 18.

@@ -34,3 +34,10 @@
 - Prevents concurrent `CREATE TABLE "user"` and `pg_type_typname_nsp_index` duplicate-key failures on fresh Docker/Podman/Kubernetes starts.
 - Full self-contained repository package.
 
+
+## r15-full - 2026-09-14
+
+- Fix PostgreSQL bootstrap visibility after schema creation.
+- Commit transactional DDL created on the advisory-lock connection before compatibility checks and ORM queries.
+- Keep the session-level PostgreSQL advisory lock held across the full bootstrap sequence.
+- Prevent fresh Docker/Podman deployments from failing with `relation "user" does not exist`.

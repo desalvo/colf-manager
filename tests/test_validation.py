@@ -59,3 +59,13 @@ def test_validate_password():
         validate_password("onlylettersxx")
     with pytest.raises(ValueError, match="lettere e numeri"):
         validate_password("123456789012")
+
+
+def test_database_bootstrap_source_commits_locked_ddl_before_compatibility():
+    from pathlib import Path
+
+    source = (Path(__file__).parents[1] / "src" / "colf_manager" / "app.py").read_text()
+    create_pos = source.index("db.metadata.create_all(bind=lock_connection or db.engine)")
+    commit_pos = source.index("lock_connection.commit()", create_pos)
+    compatibility_pos = source.index("_ensure_legacy_schema_compatibility()", create_pos)
+    assert create_pos < commit_pos < compatibility_pos

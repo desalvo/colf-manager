@@ -91,6 +91,14 @@ def _initialize_database(admin_password, testing):
             )
 
         db.metadata.create_all(bind=lock_connection or db.engine)
+        # PostgreSQL DDL is transactional. When create_all() runs on the
+        # dedicated advisory-lock connection, commit it before the legacy
+        # compatibility checks and ORM queries use other pooled connections.
+        # Session-level advisory locks survive COMMIT and continue to serialize
+        # the entire bootstrap sequence until explicitly released below.
+        if lock_connection is not None:
+            lock_connection.commit()
+
         _ensure_legacy_schema_compatibility()
 
         if not User.query.first():

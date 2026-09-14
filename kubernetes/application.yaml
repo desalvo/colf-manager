@@ -56,13 +56,17 @@ spec:
               value: "1"
             - name: COLF_MANAGER_SESSION_MINUTES
               value: "60"
+            - name: TMPDIR
+              value: /data/tmp
+            - name: TMP
+              value: /data/tmp
+            - name: TEMP
+              value: /data/tmp
           ports:
             - containerPort: 8000
           volumeMounts:
             - name: data
               mountPath: /data
-            - name: tmp
-              mountPath: /tmp
           readinessProbe:
             httpGet:
               path: /healthz
@@ -91,8 +95,6 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: app-data
-        - name: tmp
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

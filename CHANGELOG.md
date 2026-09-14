@@ -123,7 +123,7 @@
 - Keep the Alpine `postgres` UID/GID 70 security context for the database and backup workloads.
 - Add explicit PostgreSQL 17 → 18 major-upgrade guidance for existing Docker/Podman and Kubernetes installations.
 
-## r26-full - 2026-09-14
+## r27-full - 2026-09-14
 
 - Pin the application image user/group to UID/GID 10001 and declare `USER 10001:10001`.
 - Set Kubernetes application and maintenance workloads to explicit numeric `runAsUser`/`runAsGroup` 10001.

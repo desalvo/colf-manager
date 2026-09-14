@@ -36,7 +36,7 @@ services:
     environment:
       <<: *app-env
       COLF_MANAGER_MAINTENANCE_INTERVAL_SECONDS: ${COLF_MANAGER_MAINTENANCE_INTERVAL_SECONDS:-86400}
-    command: ["python", "-m", "colf_manager.maintenance", "--loop"]
+    command: ["sh", "-c", "mkdir -p /data/tmp && exec python -m colf_manager.maintenance --loop"]
     volumes: ["app-data:/data"]
     depends_on: {db: {condition: service_healthy}}
     read_only: true

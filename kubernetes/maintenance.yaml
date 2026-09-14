@@ -32,7 +32,7 @@ spec:
             - name: maintenance
               image: desalvo/colf-manager:latest
               imagePullPolicy: Always
-              command: ["python", "-m", "colf_manager.maintenance", "--once"]
+              command: ["sh", "-c", "mkdir -p /data/tmp && exec python -m colf_manager.maintenance --once"]
               env:
                 - name: POSTGRES_PASSWORD
                   valueFrom:
@@ -49,9 +49,14 @@ spec:
                   value: "1"
                 - name: COLF_MANAGER_ORPHAN_RETENTION_HOURS
                   value: "24"
+                - name: TMPDIR
+                  value: /data/tmp
+                - name: TMP
+                  value: /data/tmp
+                - name: TEMP
+                  value: /data/tmp
               volumeMounts:
                 - {name: data, mountPath: /data}
-                - {name: tmp, mountPath: /tmp}
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities: {drop: [ALL]}
@@ -62,5 +67,3 @@ spec:
           volumes:
             - name: data
               persistentVolumeClaim: {claimName: app-data}
-            - name: tmp
-              emptyDir: {}

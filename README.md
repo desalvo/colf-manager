@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r26-full
+# colf-manager 1.0.0 · build r27-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -68,4 +68,4 @@ The Dashboard can be viewed for a selected month and year. The calendar supports
 
 ## PostgreSQL 18.6
 
-r26 uses `postgres:18.6-alpine`. Existing PostgreSQL 17 installations require a supported major-version migration; see `POSTGRESQL-18-UPGRADE.md` before changing the database workload or PVC.
+r27 uses `postgres:18.6-alpine`. Existing PostgreSQL 17 installations require a supported major-version migration; see `POSTGRESQL-18-UPGRADE.md` before changing the database workload or PVC.

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-echo "== colf-manager hardening full package r34: environment preparation =="
+echo "== colf-manager hardening full package r35: environment preparation =="
 
 required=(VERSION pyproject.toml README.md src/colf_manager/templates/dashboard.html)
 for path in "${required[@]}"; do
   if [[ ! -e "$path" ]]; then
-    echo "ERROR: missing $path; use the complete r34 package." >&2
+    echo "ERROR: missing $path; use the complete r35 package." >&2
     exit 2
   fi
 done
@@ -34,5 +34,5 @@ for package, minimum in checks.items():
     print(f'{package}: {current}')
 PY
 echo
-echo "Dependencies installed for full package r34."
+echo "Dependencies installed for full package r35."
 echo "Run one command only: scripts/check-all.sh"

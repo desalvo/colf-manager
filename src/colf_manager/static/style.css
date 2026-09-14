@@ -78,7 +78,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 
 
 
-/* r34 bundled local photographic imagery */
+/* r35 bundled local photographic imagery */
 .page-dashboard .hero-photo{background:linear-gradient(145deg,#1c4840cc,#daa35f55),url('heroes/dashboard-hero-photo.png') center/cover !important;}
 .page-dashboard .page-title{background-image:url('heroes/dashboard-title.png') !important;}
 .page-calendar .page-title{background-image:url('heroes/calendar-title.png') !important;}
@@ -102,3 +102,8 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 .page-archive-admin .page-title{background-image:url('heroes/archive-admin-title.png') !important;}
 .page-users-admin .page-title{background-image:url('heroes/users-admin-title.png') !important;}
 .page-change-password .page-title{background-image:url('heroes/change-password-title.png') !important;}
+
+/* r35 compact month calendar entries */
+.fc-dayGridMonth-view .fc-event{border-radius:7px;overflow:hidden;min-height:22px}
+.fc-dayGridMonth-view .calendar-event-content.month-compact{display:block;padding:2px 5px;font-size:11px;font-weight:800;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em}
+.fc-dayGridMonth-view .fc-event:focus{outline:2px solid #fff;outline-offset:-3px;box-shadow:0 0 0 2px var(--ink)}

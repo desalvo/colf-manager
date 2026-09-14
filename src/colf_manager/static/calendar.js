@@ -188,11 +188,33 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     eventContent: (arg) => {
       if (arg.event.extendedProps.type !== 'work') return undefined;
-      const p = arg.event.extendedProps;
+      const props = arg.event.extendedProps;
       const wrap = document.createElement('div');
-      wrap.className = 'calendar-event-content';
-      wrap.innerHTML = `<b>${arg.timeText}</b><span>${p.worker}</span><small>${p.employer}</small><small>${p.location}</small>`;
+      const isMonth = arg.view.type === 'dayGridMonth';
+      wrap.className = isMonth ? 'calendar-event-content month-compact' : 'calendar-event-content';
+      if (isMonth) {
+        const start = arg.event.start ? timeString(arg.event.start) : '';
+        const end = arg.event.end ? timeString(arg.event.end) : '';
+        wrap.textContent = end ? `${start}–${end}` : start;
+      } else {
+        wrap.innerHTML = `<b>${arg.timeText}</b><span>${props.worker}</span><small>${props.employer}</small><small>${props.location}</small>`;
+      }
       return {domNodes: [wrap]};
+    },
+    eventDidMount: (info) => {
+      if (info.event.extendedProps.type !== 'work') return;
+      const props = info.event.extendedProps;
+      const start = info.event.start ? timeString(info.event.start) : '';
+      const end = info.event.end ? timeString(info.event.end) : '';
+      const details = [
+        `${start}${end ? `–${end}` : ''}`,
+        `Lavoratore: ${props.worker || '—'}`,
+        `Datore: ${props.employer || '—'}`,
+        `Luogo: ${props.location || '—'}`,
+      ].join('\n');
+      info.el.title = details;
+      info.el.setAttribute('aria-label', details.replaceAll('\n', '. '));
+      info.el.tabIndex = 0;
     },
   });
   calendar.render();

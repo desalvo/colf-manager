@@ -183,19 +183,29 @@ function initExternalPatterns() {
   if (!container || !window.FullCalendar?.Draggable) return;
   new FullCalendar.Draggable(container, {
     itemSelector: '.quick-pattern',
-    eventData: (el) => ({
-      title: el.querySelector('strong')?.textContent || 'Ore',
-      duration: {minutes: Number(el.dataset.duration || 60)},
-      backgroundColor: getComputedStyle(el).getPropertyValue('--event-color').trim(),
-      borderColor: getComputedStyle(el).getPropertyValue('--event-color').trim(),
-      extendedProps: {
-        quickPattern: true,
-        worker_id: el.dataset.workerId,
-        location_id: el.dataset.locationId,
-        break_minutes: el.dataset.break,
-        duration_minutes: el.dataset.duration,
-      },
-    }),
+    eventData: (el) => {
+      const color = getComputedStyle(el).getPropertyValue('--event-color').trim();
+      return {
+        title: el.dataset.kind === 'work' ? 'Ore retribuite' : el.querySelector('.pattern-kind')?.textContent || 'Registrazione',
+        duration: {minutes: Number(el.dataset.duration || 60)},
+        backgroundColor: color,
+        borderColor: color,
+        textColor: '#ffffff',
+        extendedProps: {
+          quickPattern: true,
+          entry_kind: el.dataset.kind || 'work',
+          worker_id: el.dataset.workerId,
+          location_id: el.dataset.locationId,
+          break_minutes: el.dataset.break,
+          duration_minutes: el.dataset.duration,
+          start_time: el.dataset.start,
+          end_time: el.dataset.end,
+          paid: el.dataset.paid === '1',
+          paid_hours: el.dataset.paidHours || '',
+          event_color: color,
+        },
+      };
+    },
   });
 }
 
@@ -249,8 +259,29 @@ document.addEventListener('DOMContentLoaded', () => {
       const props = info.event.extendedProps;
       if (!props.quickPattern) return;
       try {
-        const end = info.event.end || addMinutes(info.event.start, props.duration_minutes || 60);
-        await saveWork({worker_id: props.worker_id, location_id: props.location_id, work_date: localDateString(info.event.start), start_time: timeString(info.event.start), end_time: timeString(end), break_minutes: props.break_minutes || 0});
+        const targetDay = localDateString(info.event.start);
+        const kind = props.entry_kind || 'work';
+        if (kind === 'work') {
+          await saveWork({
+            worker_id: props.worker_id,
+            location_id: props.location_id,
+            work_date: targetDay,
+            start_time: props.start_time,
+            end_time: props.end_time,
+            break_minutes: props.break_minutes || 0,
+          });
+        } else {
+          await saveAbsence({
+            worker_id: props.worker_id,
+            kind,
+            start_date: targetDay,
+            end_date: targetDay,
+            start_time: props.start_time,
+            end_time: props.end_time,
+            paid: Boolean(props.paid),
+            paid_hours: props.paid_hours || '',
+          });
+        }
         info.event.remove();
         calendar.refetchEvents();
       } catch (error) { alert(error.message); info.event.remove(); }
@@ -273,6 +304,15 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     eventDidMount: (info) => {
       const props = info.event.extendedProps;
+      const eventColor = info.event.backgroundColor || props.event_color || info.event.borderColor;
+      if (eventColor) {
+        info.el.style.setProperty('--fc-event-bg-color', eventColor);
+        info.el.style.setProperty('--fc-event-border-color', eventColor);
+        info.el.style.backgroundColor = eventColor;
+        info.el.style.borderColor = eventColor;
+        const main = info.el.querySelector('.fc-event-main');
+        if (main) main.style.backgroundColor = eventColor;
+      }
       const start = info.event.start ? timeString(info.event.start) : '';
       const end = info.event.end ? timeString(info.event.end) : '';
       const details = props.type === 'work' ? [

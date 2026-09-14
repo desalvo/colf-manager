@@ -17,10 +17,12 @@
       <p class="fineprint">Trascina una scheda sul giorno e sull'orario desiderato. L'orario di arrivo diventa il nuovo inizio mantenendo la durata.</p>
       <div id="recentPatterns" class="recent-patterns">
       {% for p in recent_patterns %}
-        <article class="quick-pattern" draggable="true" style="--event-color:{{p.color}}"
-          data-worker-id="{{p.worker_id}}" data-location-id="{{p.location_id or ''}}" data-start="{{p.start_time}}" data-end="{{p.end_time}}" data-duration="{{p.duration_minutes}}" data-break="{{p.break_minutes}}">
-          <div class="pattern-time"><b>{{p.start_time}}–{{p.end_time}}</b><span>{{p.duration_minutes}} min</span></div>
-          <strong>{{p.worker_name}}</strong><small>{{p.employer_name}}</small><small>{{p.location_name}}</small>
+        <article class="quick-pattern quick-pattern-pill" draggable="true" style="--event-color:{{p.color}}"
+          data-kind="{{p.entry_kind}}" data-worker-id="{{p.worker_id}}" data-location-id="{{p.location_id or ''}}" data-start="{{p.start_time}}" data-end="{{p.end_time}}" data-duration="{{p.duration_minutes}}" data-break="{{p.break_minutes}}" data-paid="{{1 if p.paid else 0}}" data-paid-hours="{{p.paid_hours}}"
+          title="{{p.kind_label}} · {{p.start_time}}–{{p.end_time}} · {{p.worker_name}} · {{p.employer_name}}{% if p.location_name and p.location_name != '—' %} · {{p.location_name}}{% endif %}" tabindex="0">
+          <span class="pattern-kind">{{p.kind_label}}</span>
+          <span class="pattern-time"><b>{{p.start_time}}–{{p.end_time}}</b></span>
+          <span class="pattern-meta">{{p.worker_name}} · {{p.employer_name}}{% if p.location_name and p.location_name != '—' %} · {{p.location_name}}{% endif %}</span>
         </article>
       {% else %}<p class="fineprint">Le combinazioni usate più di recente appariranno qui.</p>{% endfor %}
       </div>

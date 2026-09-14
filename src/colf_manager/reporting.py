@@ -295,6 +295,55 @@ def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approv
 
 
 
+
+def location_trend_pdf(worker, employer, location_data, year, approval=None):
+    out, doc = _doc("Andamento ore per luogo")
+    s = _styles()
+    story = [
+        Paragraph("Andamento delle ore per luogo", s["CMTitle"]),
+        Paragraph(str(year), s["CMSub"]),
+        _party_block(worker, employer, s),
+        Spacer(1, 8),
+        Paragraph("Il prospetto distingue le ore retribuite registrate in base al luogo di lavoro memorizzato per ciascun inserimento.", s["CMBody"]),
+        Spacer(1, 7),
+    ]
+    if not location_data:
+        story.append(Paragraph("Nessuna ora retribuita registrata per l'anno selezionato.", s["CMNote"]))
+    else:
+        totals = [["Luogo", "Ore annuali"]]
+        for item in location_data:
+            totals.append([item["location"], f'{item["total"]:.2f}'])
+        table = Table(totals, colWidths=[125*mm, 35*mm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#c8d8d2")),
+            ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.8),
+            ("PADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story += [table, Spacer(1, 9), Paragraph("Dettaglio mensile", s["CMSub"])]
+        month_headers = ["Luogo"] + [f"{m:02d}" for m in range(1, 13)] + ["Tot."]
+        rows = [month_headers]
+        for item in location_data:
+            rows.append([item["location"]] + [f"{value:.2f}" for value in item["months"]] + [f'{item["total"]:.2f}'])
+        detail = Table(rows, colWidths=[48*mm] + [8.4*mm] * 12 + [12*mm], repeatRows=1)
+        detail.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#c8d8d2")),
+            ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), 5.8),
+            ("PADDING", (0, 0), (-1, -1), 2.2),
+        ]))
+        story.append(detail)
+    story += _signature_story(worker, employer, s, approval)
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    out.seek(0)
+    return out
+
 def thirteenth_payroll_pdf(worker, employer, thirteenth, year, rule_notes, fiscal=None, approval=None):
     out, doc = _doc("Cedolino tredicesima")
     s = _styles()

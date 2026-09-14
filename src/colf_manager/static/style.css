@@ -119,3 +119,18 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 .dashboard-stats{grid-template-columns:repeat(3,minmax(0,1fr));}
 @media(max-width:1100px){.dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:600px){.dashboard-stats{grid-template-columns:1fr;}}
+
+/* r40 calendar recent-pattern rail and consistent event colors */
+.calendar-shell{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:20px;align-items:start}
+.calendar-card{min-width:0}
+.calendar-rail{display:grid;gap:16px;position:sticky;top:94px;align-self:start}
+.recent-patterns{display:grid;gap:10px;margin:12px 0 14px}
+.quick-pattern-pill{display:grid;grid-template-columns:auto auto;grid-template-areas:"kind time" "meta meta";align-items:center;gap:5px 10px;padding:10px 14px;border:2px solid color-mix(in srgb,var(--event-color) 78%,#fff);border-radius:999px;background:color-mix(in srgb,var(--event-color) 13%,#fff);box-shadow:0 5px 14px rgba(18,50,45,.08);cursor:grab;user-select:none;transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}
+.quick-pattern-pill:hover,.quick-pattern-pill:focus-visible{transform:translateY(-1px);box-shadow:0 8px 20px rgba(18,50,45,.14);outline:3px solid color-mix(in srgb,var(--event-color) 23%,transparent);outline-offset:2px}
+.quick-pattern-pill:active{cursor:grabbing}
+.quick-pattern-pill .pattern-kind{grid-area:kind;display:inline-flex;align-items:center;width:max-content;padding:3px 8px;border-radius:999px;background:var(--event-color);color:#fff;font-size:10px;font-weight:900;letter-spacing:.04em;text-transform:uppercase}
+.quick-pattern-pill .pattern-time{grid-area:time;justify-self:end;color:var(--ink);font-size:12px;white-space:nowrap}
+.quick-pattern-pill .pattern-meta{grid-area:meta;color:var(--muted);font-size:10.5px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fc-dayGridMonth-view .fc-event,.fc-dayGridMonth-view .fc-event-main{background-color:var(--fc-event-bg-color)!important;border-color:var(--fc-event-border-color)!important;color:#fff!important}
+@media(max-width:1100px){.calendar-shell{grid-template-columns:minmax(0,1fr) 285px}}
+@media(max-width:850px){.calendar-shell{grid-template-columns:1fr}.calendar-rail{position:static;grid-row:auto}.quick-entry-panel{order:-1}}

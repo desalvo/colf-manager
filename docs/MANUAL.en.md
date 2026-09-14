@@ -96,3 +96,9 @@ Reports may include an approval section for the worker, employer, both, or no si
 ## Calendar: paid work, vacation and sickness
 
 From r37 the same calendar dialog lets the user select **Paid work**, **Vacation** or **Sickness**. Vacation and sickness are stored as timed intervals and may coexist on the same day with paid work. For multi-day periods, both the start and end dates are always included. Vacation and sickness use dedicated colors, while paid work keeps a stable color determined by the employer/worker/location combination. Clicking an interval allows it to be viewed, edited or deleted.
+
+## r40: drag and drop and hours trend by location
+
+Recent calendar entries are displayed in a dedicated right-side column as graphical draggable pills. Dropping one onto a new day preserves the entry type, original start/end times, worker, employer relationship, location and break; vacation and sickness items also preserve paid status and configured paid hours. Event colors are kept consistent across month, week and day views.
+
+On the Reports page, the worker is selected automatically when only one worker exists. A new **Hours trend by location** PDF is also available, with annual totals and monthly paid-work-hour breakdowns by location.

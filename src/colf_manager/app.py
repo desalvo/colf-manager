@@ -69,6 +69,7 @@ from .reporting import (
     payroll_pdf,
     tfr_annual_pdf,
     trend_pdf,
+    location_trend_pdf,
     thirteenth_payroll_pdf,
     combined_thirteenth_tfr_pdf,
 )
@@ -891,33 +892,67 @@ def create_app(test_config=None):
             recent_limit = 10
         seen = set()
         recent_patterns = []
+        candidates = []
         for entry in WorkEntry.query.order_by(WorkEntry.work_date.desc(), WorkEntry.start_time.desc()).limit(250).all():
-            worker = db.session.get(Worker, entry.worker_id)
+            candidates.append((entry.work_date, entry.start_time, "work", entry))
+        for absence in Absence.query.order_by(Absence.start_date.desc(), Absence.id.desc()).limit(250).all():
+            candidates.append((absence.start_date, absence.start_time or time(9, 0), absence.kind, absence))
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        for _, _, kind, record in candidates:
+            worker = db.session.get(Worker, record.worker_id)
             if not worker:
                 continue
             employer = db.session.get(Employer, worker.employer_id) if worker.employer_id else None
-            location_obj = db.session.get(Location, entry.location_id) if entry.location_id else None
-            if location_obj is None:
-                continue
-            key = (entry.worker_id, worker.employer_id, entry.location_id, entry.start_time, entry.end_time, entry.break_minutes)
+            employer_name = f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato"
+            if kind == "work":
+                location_obj = db.session.get(Location, record.location_id) if record.location_id else None
+                if location_obj is None:
+                    continue
+                key = ("work", record.worker_id, worker.employer_id, record.location_id, record.start_time, record.end_time, record.break_minutes)
+                start_minutes = record.start_time.hour * 60 + record.start_time.minute
+                end_minutes = record.end_time.hour * 60 + record.end_time.minute
+                recent = {
+                    "entry_kind": "work",
+                    "kind_label": "Ore retribuite",
+                    "worker_id": worker.id,
+                    "worker_name": f"{worker.first_name} {worker.last_name}",
+                    "employer_name": employer_name,
+                    "location_id": record.location_id,
+                    "location_name": location_obj.name + (f" — {location_obj.address}" if location_obj.address else ""),
+                    "start_time": record.start_time.strftime("%H:%M"),
+                    "end_time": record.end_time.strftime("%H:%M"),
+                    "duration_minutes": max(1, end_minutes - start_minutes),
+                    "break_minutes": record.break_minutes,
+                    "paid": False,
+                    "paid_hours": "",
+                    "color": _calendar_color(worker.id, worker.employer_id, record.location_id),
+                }
+            else:
+                start_clock = record.start_time or time(9, 0)
+                end_clock = record.end_time or time(17, 0)
+                key = (kind, record.worker_id, worker.employer_id, start_clock, end_clock, bool(record.paid), str(record.paid_hours or ""))
+                start_minutes = start_clock.hour * 60 + start_clock.minute
+                end_minutes = end_clock.hour * 60 + end_clock.minute
+                recent = {
+                    "entry_kind": kind,
+                    "kind_label": "Ferie" if kind == "vacation" else "Malattia" if kind == "sickness" else "Permesso non retribuito",
+                    "worker_id": worker.id,
+                    "worker_name": f"{worker.first_name} {worker.last_name}",
+                    "employer_name": employer_name,
+                    "location_id": "",
+                    "location_name": "—",
+                    "start_time": start_clock.strftime("%H:%M"),
+                    "end_time": end_clock.strftime("%H:%M"),
+                    "duration_minutes": max(1, end_minutes - start_minutes),
+                    "break_minutes": 0,
+                    "paid": bool(record.paid),
+                    "paid_hours": str(record.paid_hours or ""),
+                    "color": "#d39a26" if kind == "vacation" else "#b84d55" if kind == "sickness" else "#68777b",
+                }
             if key in seen:
                 continue
             seen.add(key)
-            start_minutes = entry.start_time.hour * 60 + entry.start_time.minute
-            end_minutes = entry.end_time.hour * 60 + entry.end_time.minute
-            duration_minutes = max(1, end_minutes - start_minutes)
-            recent_patterns.append({
-                "worker_id": worker.id,
-                "worker_name": f"{worker.first_name} {worker.last_name}",
-                "employer_name": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
-                "location_id": entry.location_id,
-                "location_name": location_obj.name + (f" — {location_obj.address}" if location_obj.address else ""),
-                "start_time": entry.start_time.strftime("%H:%M"),
-                "end_time": entry.end_time.strftime("%H:%M"),
-                "duration_minutes": duration_minutes,
-                "break_minutes": entry.break_minutes,
-                "color": _calendar_color(worker.id, worker.employer_id, entry.location_id),
-            })
+            recent_patterns.append(recent)
             if len(recent_patterns) >= recent_limit:
                 break
         recent_absences = []
@@ -1483,7 +1518,10 @@ def create_app(test_config=None):
     @login_required
     def reports():
         today = date.today()
+        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
         worker_id = request.args.get("worker_id", type=int)
+        if worker_id is None and len(workers) == 1:
+            worker_id = workers[0].id
         year = request.args.get("year", today.year, type=int)
         month = request.args.get("month", today.month, type=int)
         summary = annual = vacation = None
@@ -1498,7 +1536,7 @@ def create_app(test_config=None):
         default_place = selected_employer.address if selected_employer and selected_employer.address else ""
         return render_template(
             "reports.html",
-            workers=Worker.query.order_by(Worker.last_name).all(),
+            workers=workers,
             summary=summary,
             annual=annual,
             vacation=vacation,
@@ -1603,6 +1641,43 @@ def create_app(test_config=None):
         worker,annual,_=get_annual(worker_id,year)
         audit("trend_report_downloaded","worker",worker_id,str(year))
         return _archive_pdf(worker, "trend", f"andamento-{year}.pdf", trend_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year),Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= date(year,1,1), Expense.expense_date <= date(year,12,31)).order_by(Expense.expense_date).all(), approval=_report_approval(worker, "none")), date(year, 1, 1), date(year, 12, 31))
+
+    @app.get("/reports/location-trend.pdf")
+    @login_required
+    def location_trend_report():
+        worker_id = request.args.get("worker_id", type=int)
+        year = request.args.get("year", type=int)
+        if worker_id is None or year is None:
+            abort(400)
+        worker = db.get_or_404(Worker, worker_id)
+        entries = (
+            WorkEntry.query.filter(
+                WorkEntry.worker_id == worker_id,
+                WorkEntry.work_date >= date(year, 1, 1),
+                WorkEntry.work_date <= date(year, 12, 31),
+            )
+            .order_by(WorkEntry.work_date, WorkEntry.start_time)
+            .all()
+        )
+        by_location = {}
+        for entry in entries:
+            label = entry.location or "Luogo non specificato"
+            row = by_location.setdefault(label, {"total": Decimal("0"), "months": [Decimal("0") for _ in range(12)]})
+            row["total"] += entry.hours
+            row["months"][entry.work_date.month - 1] += entry.hours
+        location_data = [
+            {"location": label, "total": values["total"], "months": values["months"]}
+            for label, values in sorted(by_location.items(), key=lambda item: (-item[1]["total"], item[0].lower()))
+        ]
+        audit("location_trend_report_downloaded", "worker", worker_id, str(year))
+        return _archive_pdf(
+            worker,
+            "location_trend",
+            f"andamento-ore-luogo-{year}.pdf",
+            location_trend_pdf(worker, _employer_for(worker), location_data, year, approval=_report_approval(worker, "none")),
+            date(year, 1, 1),
+            date(year, 12, 31),
+        )
 
     @app.get("/reports/archive/<int:report_id>")
     @login_required

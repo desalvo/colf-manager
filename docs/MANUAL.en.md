@@ -84,6 +84,14 @@ The calendar uses a weekly time-grid: every work entry is visually proportional 
 
 Hourly rates and expenses have complete history management with create, edit and delete operations. Worker/employer expenses are included in payroll reports for the month in which they were recorded.
 
+## r57: settlements, carry-forward and installments for expenses and reimbursements
+
+Each expense or advance keeps a balance. Multiple partial settlements can be recorded by cash, bank transfer, card, another electronic method or another method. Evidence is optional: a cash settlement may exist as an auditable record without a receipt, while still retaining date, amount, method, notes and audit history. The system blocks settlement beyond the still-available balance.
+
+The remaining balance can stay in payroll for the expense month, be carried forward in full to a later month, or be split across multiple months. Installments can be defined by installment count or fixed installment amount; the last installment automatically absorbs any remainder. When a carry-forward/installment plan exists, later manual settlements are allowed and reduce future still-open quotas.
+
+When monthly payroll is generated, the quota included in that payroll is consolidated. Consolidated quotas cannot be settled or rewritten a second time; only future unconsolidated quotas remain editable and can be rescheduled. Reports distinguish original amount, manual settlements, amounts already allocated through payroll and the remaining open balance.
+
 The **Settings** page (gear icon) centralises the recent-pattern limit, SMTP/SMTPS configuration and available authentication methods. Notifications, stored documents and archived reports can be sent by e-mail directly from the application.
 
 
@@ -116,3 +124,14 @@ Workers and employers now include City, Province and Postal Code. Report signatu
 ## r48: calendar subscriptions and settings
 
 **Settings** now includes the external application URL and read-only calendar subscriptions for individual workers or employers. Each enabled calendar exposes a token-protected **ICS** link and **CalDAV** endpoint; employer calendars aggregate events for their associated workers. Feeds include paid work, vacation and sickness. Personal password changes are now integrated into Settings.
+
+## Graphic signatures in reports
+Worker and employer records can store a graphic signature in PNG, JPEG, TIFF, WEBP or BMP format. When a report requires that party's signature and a signature is registered, the image is automatically placed in the signature area; otherwise a manual signature line is shown. Every PDF also carries the colf-manager logo, version/build and author.
+
+## Payments and receipts
+The Payments section records salary payments, INPS contributions, thirteenth-month salary, TFR, expense reimbursements and other payments. Each record can be Pending or Paid and can include payment date, reference period, description, notes and supporting attachments such as PDF receipts or images. INPS contribution payments are available only for workers with an INPS position recorded.
+
+Generating a monthly payslip automatically creates a residual Pending salary item and, when an INPS calculation is available, a contribution item. Amounts already recorded as Paid are shown in reports and reduce the displayed residual. Regenerating a report updates the automatic residual item instead of creating uncontrolled duplicates.
+
+## Report archive and backup
+After generating a report from the UI, the Reports page refreshes automatically and the new document is immediately visible in the archive. Archived reports can be viewed in the browser, downloaded, emailed or deleted. Full export includes the database, documents, reports, graphic signatures, payments and payment attachments; full import restores the same content and relationships.

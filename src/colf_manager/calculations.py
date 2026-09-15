@@ -129,25 +129,85 @@ def _paid_absence_value(absence, rates, period_start, period_end):
     return sum((hours_per_day * rate_on(rates, day) for day in _days(overlap_start, overlap_end)), Decimal("0"))
 
 
+def _expense_due_for_period(expense, period_start, period_end):
+    amount = Decimal(expense.amount)
+    settlements = list(getattr(expense, "settlements", []) or [])
+    allocations = list(getattr(expense, "recovery_allocations", []) or [])
+
+    # Legacy records explicitly marked reimbursed remain fully settled.
+    if getattr(expense, "reimbursed", False) and not settlements and not allocations:
+        return Decimal("0")
+
+    settled_through_period = sum(
+        (Decimal(item.amount) for item in settlements if item.settlement_date <= period_end),
+        Decimal("0"),
+    )
+
+    if not allocations:
+        if not (period_start <= expense.expense_date <= period_end):
+            return Decimal("0")
+        return max(Decimal("0"), amount - settled_through_period)
+
+    prior_allocated = sum(
+        (Decimal(item.amount) for item in allocations if item.due_month < period_start),
+        Decimal("0"),
+    )
+    current_planned = sum(
+        (
+            Decimal(item.amount)
+            for item in allocations
+            if period_start <= item.due_month <= period_end
+        ),
+        Decimal("0"),
+    )
+    remaining_before_current = max(
+        Decimal("0"), amount - settled_through_period - prior_allocated
+    )
+    return min(current_planned, remaining_before_current)
+
+
 def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=TFR_DIVISOR):
     period_start, period_end = period_bounds(year, month)
     entries = [e for e in entries if period_start <= e.work_date <= period_end]
     worked_hours = sum((e.hours for e in entries), Decimal("0"))
     worked_pay = sum((e.hours * rate_on(rates, e.work_date) for e in entries), Decimal("0"))
-    paid_absence = sum((_paid_absence_value(a, rates, period_start, period_end) for a in absences), Decimal("0"))
-    worker_advances = sum((Decimal(e.amount) for e in expenses if period_start <= e.expense_date <= period_end and not e.reimbursed and e.direction == "worker_advance"), Decimal("0"))
-    employer_advances = sum((Decimal(e.amount) for e in expenses if period_start <= e.expense_date <= period_end and not e.reimbursed and e.direction == "employer_advance"), Decimal("0"))
+    paid_absence = sum(
+        (_paid_absence_value(a, rates, period_start, period_end) for a in absences),
+        Decimal("0"),
+    )
+
+    worker_advances = sum(
+        (
+            _expense_due_for_period(e, period_start, period_end)
+            for e in expenses
+            if e.direction == "worker_advance"
+        ),
+        Decimal("0"),
+    )
+    employer_advances = sum(
+        (
+            _expense_due_for_period(e, period_start, period_end)
+            for e in expenses
+            if e.direction == "employer_advance"
+        ),
+        Decimal("0"),
+    )
     expense_adjustment = worker_advances - employer_advances
     gross = money(worked_pay + paid_absence)
     thirteenth_accrual = money(gross / Decimal("12"))
     tfr_useful = money(gross + thirteenth_accrual)
     tfr_accrual = money(tfr_useful / Decimal(tfr_factor)) if tfr_factor else Decimal("0")
     return {
-        "worked_hours": money(worked_hours), "worked_pay": money(worked_pay),
-        "paid_absence": money(paid_absence), "worker_advances": money(worker_advances),
-        "employer_advances": money(employer_advances), "reimbursements": money(expense_adjustment),
-        "gross": gross, "thirteenth_accrual": thirteenth_accrual,
-        "tfr_useful_compensation": tfr_useful, "tfr_accrual": tfr_accrual,
+        "worked_hours": money(worked_hours),
+        "worked_pay": money(worked_pay),
+        "paid_absence": money(paid_absence),
+        "worker_advances": money(worker_advances),
+        "employer_advances": money(employer_advances),
+        "reimbursements": money(expense_adjustment),
+        "gross": gross,
+        "thirteenth_accrual": thirteenth_accrual,
+        "tfr_useful_compensation": tfr_useful,
+        "tfr_accrual": tfr_accrual,
         "payable": money(gross + expense_adjustment),
     }
 
@@ -219,7 +279,7 @@ def _inps_hourly_amount(year, effective_hourly, weekly_hours):
 
 
 def inps_contribution_summary(worker, annual, year):
-    if not worker.inps_number or not worker.contract_number:
+    if not worker.inps_number:
         return None
     hours = Decimal(annual.get("worked_hours") or 0)
     if hours <= 0:

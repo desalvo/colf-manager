@@ -38,6 +38,9 @@ class Employer(db.Model):
     phone = db.Column(db.String(40))
     email = db.Column(db.String(255))
     notes = db.Column(db.Text)
+    signature_stored_name = db.Column(db.String(255))
+    signature_filename = db.Column(db.String(255))
+    signature_mime_type = db.Column(db.String(120))
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
 
@@ -62,6 +65,9 @@ class Worker(db.Model):
     employment_end = db.Column(db.Date)
     weekly_hours = db.Column(db.Numeric(6, 2), default=0)
     vacation_advance_allowed = db.Column(db.Boolean, default=False, nullable=False)
+    signature_stored_name = db.Column(db.String(255))
+    signature_filename = db.Column(db.String(255))
+    signature_mime_type = db.Column(db.String(120))
     notes = db.Column(db.Text)
 
 
@@ -134,6 +140,60 @@ class Expense(db.Model):
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     direction = db.Column(db.String(20), default="employer_advance", nullable=False)
     reimbursed = db.Column(db.Boolean, default=False, nullable=False)
+    settlements = db.relationship(
+        "ExpenseSettlement",
+        backref="expense",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ExpenseSettlement.settlement_date, ExpenseSettlement.id",
+    )
+    recovery_allocations = db.relationship(
+        "ExpenseRecoveryAllocation",
+        backref="expense",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ExpenseRecoveryAllocation.due_month, ExpenseRecoveryAllocation.id",
+    )
+
+
+class ExpenseSettlement(db.Model):
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_expense_settlement_amount_positive"),
+        CheckConstraint(
+            "method IN ('cash','bank_transfer','card','electronic','other')",
+            name="ck_expense_settlement_method",
+        ),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(db.Integer, db.ForeignKey("expense.id", ondelete="CASCADE"), nullable=False, index=True)
+    settlement_date = db.Column(db.Date, nullable=False, index=True)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    method = db.Column(db.String(24), default="cash", nullable=False)
+    notes = db.Column(db.Text)
+    filename = db.Column(db.String(255))
+    stored_name = db.Column(db.String(255), unique=True)
+    mime_type = db.Column(db.String(120))
+    sha256 = db.Column(db.String(64), index=True)
+    size_bytes = db.Column(db.Integer)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"), index=True)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class ExpenseRecoveryAllocation(db.Model):
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_expense_recovery_allocation_amount_positive"),
+        UniqueConstraint("expense_id", "due_month", name="uq_expense_recovery_allocation_month"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    expense_id = db.Column(
+        db.Integer, db.ForeignKey("expense.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # First day of the month to which this quota belongs.
+    due_month = db.Column(db.Date, nullable=False, index=True)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    locked_at = db.Column(db.DateTime, index=True)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False, index=True)
 
 
 class Document(db.Model):
@@ -162,6 +222,42 @@ class GeneratedReport(db.Model):
     period_start = db.Column(db.Date)
     period_end = db.Column(db.Date)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False, index=True)
+
+
+class Payment(db.Model):
+    __table_args__ = (
+        CheckConstraint("amount >= 0", name="ck_payment_amount_nonnegative"),
+        CheckConstraint(
+            "payment_type IN ('salary','inps_contributions','thirteenth','tfr','expense_refund','other')",
+            name="ck_payment_type",
+        ),
+        CheckConstraint("status IN ('pending','paid')", name="ck_payment_status"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    worker_id = db.Column(db.Integer, db.ForeignKey("worker.id", ondelete="CASCADE"), nullable=False, index=True)
+    employer_id = db.Column(db.Integer, db.ForeignKey("employer.id", ondelete="SET NULL"), index=True)
+    source_report_id = db.Column(db.Integer, db.ForeignKey("generated_report.id", ondelete="SET NULL"), index=True)
+    payment_type = db.Column(db.String(40), nullable=False, index=True)
+    amount = db.Column(db.Numeric(12, 2), nullable=False)
+    status = db.Column(db.String(20), default="pending", nullable=False, index=True)
+    payment_date = db.Column(db.Date)
+    period_start = db.Column(db.Date, index=True)
+    period_end = db.Column(db.Date, index=True)
+    description = db.Column(db.String(255))
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=utcnow, nullable=False, index=True)
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class PaymentAttachment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    payment_id = db.Column(db.Integer, db.ForeignKey("payment.id", ondelete="CASCADE"), nullable=False, index=True)
+    filename = db.Column(db.String(255), nullable=False)
+    stored_name = db.Column(db.String(255), unique=True, nullable=False)
+    mime_type = db.Column(db.String(120))
+    sha256 = db.Column(db.String(64), index=True)
+    size_bytes = db.Column(db.Integer)
+    uploaded_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
 
 class Setting(db.Model):

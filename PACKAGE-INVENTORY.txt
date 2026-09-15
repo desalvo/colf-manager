@@ -45,6 +45,9 @@ migrations/versions/1002_contract_tax_reporting.py
 migrations/versions/1003_locations.py
 migrations/versions/1004_generated_reports.py
 migrations/versions/1005_person_address_fields.py
+migrations/versions/1006_signatures_payments.py
+migrations/versions/1007_expense_settlements.py
+migrations/versions/1008_expense_recovery_allocations.py
 output/pdf/colf-manager-manual-v1.0.0-en.pdf
 output/pdf/colf-manager-manual-v1.0.0-it.pdf
 pyproject.toml
@@ -108,13 +111,18 @@ src/colf_manager/templates/documents.html
 src/colf_manager/templates/employer_detail.html
 src/colf_manager/templates/employer_edit.html
 src/colf_manager/templates/employers.html
+src/colf_manager/templates/expense_detail.html
 src/colf_manager/templates/expense_edit.html
+src/colf_manager/templates/expense_settlement_edit.html
 src/colf_manager/templates/expenses.html
 src/colf_manager/templates/location_detail.html
 src/colf_manager/templates/location_edit.html
 src/colf_manager/templates/locations.html
 src/colf_manager/templates/login.html
 src/colf_manager/templates/mail_compose.html
+src/colf_manager/templates/payment_detail.html
+src/colf_manager/templates/payment_edit.html
+src/colf_manager/templates/payments.html
 src/colf_manager/templates/rate_edit.html
 src/colf_manager/templates/rates.html
 src/colf_manager/templates/reports.html
@@ -126,4 +134,5 @@ src/colf_manager/templates/workers.html
 src/colf_manager/validation.py
 tests/test_app.py
 tests/test_backup_storage.py
+tests/test_payments.py
 tests/test_validation.py

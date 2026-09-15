@@ -5,7 +5,16 @@ import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .models import AuditLog, Document, GeneratedReport, db
+from .models import (
+    AuditLog,
+    Document,
+    Employer,
+    ExpenseSettlement,
+    GeneratedReport,
+    PaymentAttachment,
+    Worker,
+    db,
+)
 
 
 def _utcnow():
@@ -61,10 +70,30 @@ def cleanup_orphan_files(app, retention_hours=None, dry_run=False):
     cutoff = _utcnow() - timedelta(hours=max(retention_hours, 0))
     referenced = {
         Path(app.config["UPLOAD_FOLDER"]): {
-            document.stored_name for document in Document.query.all()
+            stored_name
+            for stored_name in [
+                *[document.stored_name for document in Document.query.all()],
+                *[
+                    settlement.stored_name
+                    for settlement in ExpenseSettlement.query.all()
+                    if settlement.stored_name
+                ],
+            ]
+            if stored_name
         },
         Path(app.config["REPORT_FOLDER"]): {
             report.stored_name for report in GeneratedReport.query.all()
+        },
+        Path(app.config["SIGNATURE_FOLDER"]): {
+            stored
+            for stored in [
+                *[worker.signature_stored_name for worker in Worker.query.all()],
+                *[employer.signature_stored_name for employer in Employer.query.all()],
+            ]
+            if stored
+        },
+        Path(app.config["PAYMENT_FOLDER"]): {
+            attachment.stored_name for attachment in PaymentAttachment.query.all()
         },
     }
     deleted = []

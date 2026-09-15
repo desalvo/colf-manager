@@ -84,7 +84,9 @@ def create_full_export(app):
         checksums["database.json"] = hashlib.sha256(database_bytes).hexdigest()
         for table_name, folder_key, prefix in (
             ("document", "UPLOAD_FOLDER", "files/documents"),
+            ("expense_settlement", "UPLOAD_FOLDER", "files/expense-settlements"),
             ("generated_report", "REPORT_FOLDER", "files/reports"),
+            ("payment_attachment", "PAYMENT_FOLDER", "files/payments"),
         ):
             folder = Path(app.config[folder_key])
             for row in database["tables"].get(table_name, []):
@@ -99,6 +101,22 @@ def create_full_export(app):
                 payload = path.read_bytes()
                 zf.writestr(arcname, payload)
                 checksums[arcname] = hashlib.sha256(payload).hexdigest()
+        signature_folder = Path(app.config["SIGNATURE_FOLDER"])
+        signature_names = {
+            row.get("signature_stored_name")
+            for table_name in ("worker", "employer")
+            for row in database["tables"].get(table_name, [])
+            if row.get("signature_stored_name")
+        }
+        for stored_name in sorted(signature_names):
+            path = signature_folder / stored_name
+            arcname = f"files/signatures/{stored_name}"
+            if not path.is_file():
+                missing.append(arcname)
+                continue
+            payload = path.read_bytes()
+            zf.writestr(arcname, payload)
+            checksums[arcname] = hashlib.sha256(payload).hexdigest()
         manifest = {
             "format": "colf-manager-full-export",
             "schema_version": SCHEMA_VERSION,
@@ -194,6 +212,8 @@ def restore_full_export(app, fileobj):
         for folder_key, relative in (
             ("UPLOAD_FOLDER", Path("files/documents")),
             ("REPORT_FOLDER", Path("files/reports")),
+            ("SIGNATURE_FOLDER", Path("files/signatures")),
+            ("PAYMENT_FOLDER", Path("files/payments")),
         ):
             target = Path(app.config[folder_key])
             target.mkdir(parents=True, exist_ok=True)
@@ -205,6 +225,13 @@ def restore_full_export(app, fileobj):
                 for item in source.iterdir():
                     if item.is_file():
                         shutil.copy2(item, target / item.name)
+        settlement_source = staging / "files" / "expense-settlements"
+        if settlement_source.exists():
+            upload_target = Path(app.config["UPLOAD_FOLDER"])
+            for item in settlement_source.iterdir():
+                if item.is_file():
+                    shutil.copy2(item, upload_target / item.name)
+
         return {
             "tables": {name: len(rows) for name, rows in incoming.items()},
             "source_version": database.get("app_version"),

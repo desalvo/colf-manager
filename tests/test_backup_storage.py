@@ -8,7 +8,16 @@ import pytest
 
 from colf_manager.app import create_app
 from colf_manager.backup import create_full_export, restore_full_export
-from colf_manager.models import AuditLog, Document, GeneratedReport, WorkEntry, Worker, db
+from colf_manager.models import (
+    AuditLog,
+    Document,
+    GeneratedReport,
+    Payment,
+    PaymentAttachment,
+    WorkEntry,
+    Worker,
+    db,
+)
 from colf_manager.storage import cleanup_orphan_files, safe_unlink, store_report
 
 
@@ -21,6 +30,8 @@ def archive_app(tmp_path):
             "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
             "UPLOAD_FOLDER": str(tmp_path / "documents"),
             "REPORT_FOLDER": str(tmp_path / "reports"),
+            "SIGNATURE_FOLDER": str(tmp_path / "signatures"),
+            "PAYMENT_FOLDER": str(tmp_path / "payments"),
             "SESSION_COOKIE_SECURE": False,
             "TEST_ADMIN_PASSWORD": "Test-password-123",
         }
@@ -65,6 +76,41 @@ def _seed_archive_data(app):
             date(2026, 1, 1),
             date(2026, 1, 31),
         )
+        signature_dir = Path(app.config["SIGNATURE_FOLDER"])
+        signature_dir.mkdir(parents=True, exist_ok=True)
+        worker.signature_stored_name = "worker-signature.png"
+        worker.signature_filename = "firma.png"
+        worker.signature_mime_type = "image/png"
+        (signature_dir / worker.signature_stored_name).write_bytes(b"signature")
+
+        payment = Payment(
+            worker_id=worker.id,
+            source_report_id=report.id,
+            payment_type="salary",
+            amount=100,
+            status="paid",
+            payment_date=date(2026, 2, 1),
+            period_start=date(2026, 1, 1),
+            period_end=date(2026, 1, 31),
+        )
+        db.session.add(payment)
+        db.session.flush()
+        payment_dir = Path(app.config["PAYMENT_FOLDER"])
+        payment_dir.mkdir(parents=True, exist_ok=True)
+        attachment_name = "quietanza-test.pdf"
+        attachment_payload = b"%PDF-1.4\nreceipt\n%%EOF"
+        (payment_dir / attachment_name).write_bytes(attachment_payload)
+        db.session.add(
+            PaymentAttachment(
+                payment_id=payment.id,
+                filename="quietanza.pdf",
+                stored_name=attachment_name,
+                mime_type="application/pdf",
+                sha256="1" * 64,
+                size_bytes=len(attachment_payload),
+            )
+        )
+        db.session.commit()
         return worker.id, report.id
 
 
@@ -79,6 +125,8 @@ def test_full_export_contains_database_documents_and_reports(archive_app):
             assert "database.json" in names
             assert "files/documents/contract-test.pdf" in names
             assert any(name.startswith("files/reports/") for name in names)
+            assert "files/signatures/worker-signature.png" in names
+            assert "files/payments/quietanza-test.pdf" in names
 
 
 def test_full_export_round_trip_restores_database_and_files(archive_app):
@@ -88,7 +136,7 @@ def test_full_export_round_trip_restores_database_and_files(archive_app):
         worker = db.session.get(Worker, worker_id)
         worker.first_name = "Changed"
         db.session.commit()
-        for folder_key in ("UPLOAD_FOLDER", "REPORT_FOLDER"):
+        for folder_key in ("UPLOAD_FOLDER", "REPORT_FOLDER", "SIGNATURE_FOLDER", "PAYMENT_FOLDER"):
             for path in Path(archive_app.config[folder_key]).iterdir():
                 if path.is_file():
                     path.unlink()
@@ -101,10 +149,18 @@ def test_full_export_round_trip_restores_database_and_files(archive_app):
         assert result["source_version"] == "1.0.0"
         assert Document.query.count() == 1
         assert GeneratedReport.query.count() == 1
+        assert Payment.query.count() == 1
+        assert PaymentAttachment.query.count() == 1
         document = Document.query.one()
         report = GeneratedReport.query.one()
+        restored_worker = db.session.get(Worker, worker_id)
+        attachment = PaymentAttachment.query.one()
         assert (Path(archive_app.config["UPLOAD_FOLDER"]) / document.stored_name).is_file()
         assert (Path(archive_app.config["REPORT_FOLDER"]) / report.stored_name).is_file()
+        assert (
+            Path(archive_app.config["SIGNATURE_FOLDER"]) / restored_worker.signature_stored_name
+        ).is_file()
+        assert (Path(archive_app.config["PAYMENT_FOLDER"]) / attachment.stored_name).is_file()
 
 
 def test_full_export_round_trip_preserves_time_values(archive_app):

@@ -69,3 +69,13 @@ La Panoramica può essere consultata scegliendo mese e anno. Il calendario conse
 ## PostgreSQL 18.6
 
 La r25 usa `postgres:18.6-alpine`. Le installazioni PostgreSQL 17 esistenti richiedono una migrazione major supportata; leggere `POSTGRESQL-18-UPGRADE.it.md` prima di modificare il workload database o il PVC.
+
+### Novità r55 - report, firme e pagamenti
+- Report PDF con logo applicativo, versione/build e autore su ogni pagina, grafica rinnovata e visualizzazione inline dall'archivio.
+- Firma grafica opzionale per lavoratore e datore caricabile dalle rispettive anagrafiche (PNG, JPEG, TIFF, WEBP, BMP) e apposta automaticamente ai report quando richiesta.
+- Registro Pagamenti con inserimento manuale e generazione automatica del residuo dai report: retribuzioni, contributi INPS, tredicesima, TFR, rimborsi e altri pagamenti; stato, data, periodo, note e allegati.
+- I contributi INPS sono disponibili solo quando il lavoratore ha una posizione INPS registrata.
+- Full export/import include firme, pagamenti e relativi allegati oltre a database, documenti e report.
+
+### Compensazioni manuali di spese e rimborsi
+Ogni spesa crea una partita a credito del datore o del lavoratore. È possibile registrare più compensazioni parziali, anche in contanti e senza allegato, oppure con bonifico/carta/altro metodo e documento facoltativo. Il sistema mantiene importo originario, totale compensato e residuo; impedisce di compensare oltre il saldo disponibile. Il residuo può essere lasciato nel cedolino del mese della spesa, riportato integralmente a un mese successivo oppure rateizzato su più mesi indicando il numero di rate o l'importo della rata. Le compensazioni manuali restano possibili nei mesi successivi quando esiste un piano di riporto/rateizzazione e riducono le quote future ancora aperte. Le quote già confluite in un cedolino sono consolidate e non possono essere compensate una seconda volta. In questo modo una spesa da €120 compensata per €40 e poi €30 produce un residuo di €50 nel cedolino.

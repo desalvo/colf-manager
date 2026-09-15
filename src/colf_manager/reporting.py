@@ -1,6 +1,10 @@
 # fmt: off
 from io import BytesIO
+import logging
+from calendar import monthrange
 from datetime import date
+from decimal import Decimal
+from pathlib import Path
 
 from reportlab.graphics.charts.barcharts import VerticalBarChart
 from reportlab.graphics.shapes import Drawing, String
@@ -9,13 +13,18 @@ from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image as RLImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+from . import __author__, __build__, __version__
 
 BRAND = colors.HexColor("#173f3a")
 ACCENT = colors.HexColor("#287d70")
 GOLD = colors.HexColor("#dfa63d")
 PALE = colors.HexColor("#f3f7f5")
 TEXT = colors.HexColor("#263c37")
+MUTED = colors.HexColor("#6b7d77")
+LINE = colors.HexColor("#c8d8d2")
+LOGO_PATH = Path(__file__).resolve().parent / "static" / "logo.png"
 
 
 def _styles():
@@ -31,22 +40,32 @@ def _styles():
 
 def _footer(canvas, doc):
     canvas.saveState()
+    width, height = A4
     canvas.setFillColor(BRAND)
-    canvas.rect(0, A4[1] - 13*mm, A4[0], 13*mm, fill=1, stroke=0)
+    canvas.rect(0, height - 16*mm, width, 16*mm, fill=1, stroke=0)
+    if LOGO_PATH.is_file():
+        try:
+            canvas.drawImage(str(LOGO_PATH), 15*mm, height - 13.2*mm, width=9*mm, height=9*mm, preserveAspectRatio=True, mask="auto")
+        except Exception:
+            logging.getLogger(__name__).debug("Unable to draw report logo", exc_info=True)
     canvas.setFillColor(colors.white)
-    canvas.setFont("Helvetica-Bold", 10)
-    canvas.drawString(18*mm, A4[1] - 8.5*mm, "COLF MANAGER")
-    canvas.setFont("Helvetica", 7)
-    canvas.drawRightString(A4[0]-18*mm, A4[1]-8.5*mm, "Documento gestionale riservato")
-    canvas.setFillColor(colors.HexColor("#667873"))
-    canvas.drawString(18*mm, 9*mm, "colf-manager · EUPL-1.2")
-    canvas.drawRightString(A4[0]-18*mm, 9*mm, f"Pagina {doc.page}")
+    canvas.setFont("Helvetica-Bold", 10.5)
+    canvas.drawString(27*mm, height - 8.2*mm, "COLF MANAGER")
+    canvas.setFont("Helvetica", 6.8)
+    canvas.drawString(27*mm, height - 12.2*mm, f"v{__version__} · {__build__} · {__author__}")
+    canvas.drawRightString(width - 15*mm, height - 10.3*mm, "Documento gestionale riservato")
+    canvas.setStrokeColor(LINE)
+    canvas.line(15*mm, 14*mm, width - 15*mm, 14*mm)
+    canvas.setFillColor(MUTED)
+    canvas.setFont("Helvetica", 6.6)
+    canvas.drawString(15*mm, 9.5*mm, f"colf-manager · v{__version__} · {__author__} · EUPL-1.2")
+    canvas.drawRightString(width - 15*mm, 9.5*mm, f"Pagina {doc.page}")
     canvas.restoreState()
 
 
 def _doc(title):
     out = BytesIO()
-    doc = SimpleDocTemplate(out, pagesize=A4, leftMargin=17*mm, rightMargin=17*mm, topMargin=20*mm, bottomMargin=17*mm, title=title, author="colf-manager")
+    doc = SimpleDocTemplate(out, pagesize=A4, leftMargin=17*mm, rightMargin=17*mm, topMargin=23*mm, bottomMargin=18*mm, title=title, author="colf-manager")
     return out, doc
 
 
@@ -109,21 +128,43 @@ def _fiscal_story(fiscal, styles):
 
 
 
-def _expense_story(expenses, styles):
+def _expense_story(expenses, styles, as_of=None):
     expenses = list(expenses or [])
     if not expenses:
         return []
-    rows = [["Data", "Descrizione", "Sostenuta da", "Importo", "Stato"]]
+    rows = [["Data", "Descrizione", "Sostenuta da", "Originaria", "Compensata", "Residuo"]]
     for expense in sorted(expenses, key=lambda item: item.expense_date):
         owner = "Lavoratore" if expense.direction == "worker_advance" else "Datore di lavoro"
+        settlements = [
+            item
+            for item in (getattr(expense, "settlements", []) or [])
+            if as_of is None or item.settlement_date <= as_of
+        ]
+        allocations = [
+            item
+            for item in (getattr(expense, "recovery_allocations", []) or [])
+            if as_of is None or item.due_month <= as_of
+        ]
+        if expense.reimbursed and not settlements and not allocations:
+            settled = Decimal(expense.amount)
+            payroll_allocated = Decimal("0")
+        else:
+            settled = sum((Decimal(item.amount) for item in settlements), Decimal("0"))
+            payroll_allocated = sum(
+                (Decimal(item.amount) for item in allocations if item.locked_at), Decimal("0")
+            )
+        residual = max(
+            Decimal("0"), Decimal(expense.amount) - settled - payroll_allocated
+        )
         rows.append([
             expense.expense_date.strftime("%d/%m/%Y"),
             expense.description,
             owner,
             _money(expense.amount),
-            "Regolata" if expense.reimbursed else "Da regolare",
+            _money(settled + payroll_allocated),
+            _money(residual),
         ])
-    table = Table(rows, colWidths=[24*mm, 62*mm, 34*mm, 24*mm, 25*mm], repeatRows=1)
+    table = Table(rows, colWidths=[20*mm, 54*mm, 29*mm, 22*mm, 23*mm, 22*mm], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), BRAND),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -131,10 +172,99 @@ def _expense_story(expenses, styles):
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]),
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#c8d8d2")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("FONTSIZE", (0, 0), (-1, -1), 7.3),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.0),
         ("PADDING", (0, 0), (-1, -1), 4),
     ]))
-    return [Paragraph("Spese e rimborsi del periodo", styles["CMSub"]), table]
+    detail = []
+    for expense in sorted(expenses, key=lambda item: item.expense_date):
+        for settlement in getattr(expense, "settlements", []) or []:
+            if as_of is not None and settlement.settlement_date > as_of:
+                continue
+            methods = {
+                "cash": "contanti",
+                "bank_transfer": "bonifico",
+                "card": "carta",
+                "electronic": "elettronico",
+                "other": "altro",
+            }
+            doc = settlement.filename or "senza documento"
+            detail.append(Paragraph(
+                f"• {settlement.settlement_date.strftime('%d/%m/%Y')} — {expense.description}: "
+                f"{_money(settlement.amount)} ({methods.get(settlement.method, settlement.method)}; {doc})",
+                styles["CMNote"],
+            ))
+    story = [Paragraph("Spese, compensazioni e residui del periodo", styles["CMSub"]), table]
+    if detail:
+        story.append(Paragraph("Compensazioni manuali registrate", styles["CMSub"]))
+        story.extend(detail)
+    return story
+
+def _signature_image(path):
+    if not path or not Path(path).is_file():
+        return None
+    try:
+        image = RLImage(path)
+        max_w, max_h = 38 * mm, 16 * mm
+        ratio = min(max_w / image.imageWidth, max_h / image.imageHeight)
+        image.drawWidth = image.imageWidth * ratio
+        image.drawHeight = image.imageHeight * ratio
+        return image
+    except Exception:
+        return None
+
+
+def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrati", due_types=None):
+    payments = list(payments or [])
+    if not payments and due_amount is None:
+        return []
+    story = [Paragraph(title, styles["CMSub"])]
+    paid_total = sum((p.amount for p in payments if getattr(p, "status", "") == "paid" and (not due_types or p.payment_type in due_types)), 0)
+    if due_amount is not None:
+        residual = max(due_amount - paid_total, 0)
+        story.append(_kv_table([
+            ["Situazione liquidazione", "Importo"],
+            ["Dovuto / maturato nel prospetto", _money(due_amount)],
+            ["Quota già liquidata registrata", _money(paid_total)],
+            ["Residuo da liquidare", _money(residual)],
+        ]))
+        story.append(Spacer(1, 5))
+    if payments:
+        labels = {
+            "salary": "Retribuzione",
+            "inps_contributions": "Contributi INPS",
+            "thirteenth": "Tredicesima",
+            "tfr": "TFR",
+            "expense_refund": "Rimborso spese",
+            "other": "Altro",
+        }
+        rows = [["Tipo", "Stato", "Data", "Importo", "Periodo"]]
+        for payment in payments:
+            period = ""
+            if payment.period_start:
+                period = payment.period_start.strftime("%d/%m/%Y")
+            if payment.period_end and payment.period_end != payment.period_start:
+                period += " → " + payment.period_end.strftime("%d/%m/%Y")
+            rows.append([
+                labels.get(payment.payment_type, payment.payment_type),
+                "Pagato" if payment.status == "paid" else "Da pagare",
+                payment.payment_date.strftime("%d/%m/%Y") if payment.payment_date else "—",
+                _money(payment.amount),
+                period or "—",
+            ])
+        table = Table(rows, colWidths=[36*mm, 25*mm, 28*mm, 30*mm, 45*mm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), ACCENT),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]),
+            ("GRID", (0, 0), (-1, -1), 0.35, LINE),
+            ("FONTSIZE", (0, 0), (-1, -1), 7.1),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("PADDING", (0, 0), (-1, -1), 4),
+        ]))
+        story.append(table)
+    return story
+
 
 def _signature_story(worker, employer, styles, approval=None):
     approval = approval or {}
@@ -168,25 +298,25 @@ def _signature_story(worker, employer, styles, approval=None):
 
     signers = []
     if mode in {"worker", "both"}:
-        signers.append(("Firma lavoratore", f"{worker.first_name} {worker.last_name}"))
+        signers.append(("Firma lavoratore", f"{worker.first_name} {worker.last_name}", approval.get("worker_signature")))
     if mode in {"employer", "both"}:
         employer_name = (
             f"{employer.first_name} {employer.last_name}"
             if employer
             else "Datore di lavoro non associato"
         )
-        signers.append(("Firma datore di lavoro", employer_name))
+        signers.append(("Firma datore di lavoro", employer_name, approval.get("employer_signature")))
 
     cells = []
-    for label, name in signers:
-        cells.append(
-            Paragraph(
-                f"<b>{label}</b><br/><br/><br/>"
-                "________________________________________<br/>"
-                f"<b>{name}</b>",
-                styles["CMCenter"],
-            )
-        )
+    for label, name, signature_path in signers:
+        signature = _signature_image(signature_path)
+        body = [Paragraph(f"<b>{label}</b>", styles["CMCenter"]), Spacer(1, 5)]
+        if signature:
+            body.extend([signature, Spacer(1, 3)])
+        else:
+            body.extend([Spacer(1, 13*mm), Paragraph("________________________________________", styles["CMCenter"])])
+        body.append(Paragraph(f"<b>{name}</b>", styles["CMCenter"]))
+        cells.append(body)
     widths = [160 * mm] if len(cells) == 1 else [80 * mm, 80 * mm]
     table = Table([cells], colWidths=widths)
     table.setStyle(
@@ -201,7 +331,7 @@ def _signature_story(worker, employer, styles, approval=None):
     story.append(table)
     return story
 
-def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fiscal=None, expenses=None, title="Cedolino mensile gestionale", approval=None):
+def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fiscal=None, expenses=None, title="Cedolino mensile gestionale", approval=None, payments=None):
     out, doc = _doc(title)
     s = _styles()
     story = [Paragraph(title, s["CMTitle"]), Paragraph(f"Periodo {month:02d}/{year}", s["CMSub"]), _party_block(worker, employer, s), Spacer(1, 7)]
@@ -209,8 +339,9 @@ def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fisc
     story.append(_kv_table(rows))
     if vacation:
         story += [Paragraph("Ferie", s["CMSub"]), _kv_table([["Situazione ferie", "Giorni"],["Maturate alla data", str(vacation["accrued"])],["Proiezione fine anno", str(vacation["projected"])],["Godute/programmate", str(vacation["used_scheduled"])],["Disponibili secondo impostazione", str(vacation["available_usable"])]])]
-    story += _expense_story(expenses, s)
+    story += _expense_story(expenses, s, date(year, month, monthrange(year, month)[1]))
     story += _fiscal_story(fiscal, s)
+    story += _payment_story(payments, s, summary.get("payable"), due_types={"salary"})
     story += [Spacer(1, 10), Paragraph("Il presente documento è un prospetto gestionale. Verificare sempre contratto applicato, contributi INPS, minimi retributivi e normativa vigente per il periodo considerato.", s["CMNote"])]
     story += _signature_story(worker, employer, s, approval)
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
@@ -218,7 +349,7 @@ def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fisc
     return out
 
 
-def annual_payroll_pdf(worker, employer, annual, year, vacation, fiscal=None, expenses=None, approval=None):
+def annual_payroll_pdf(worker, employer, annual, year, vacation, fiscal=None, expenses=None, approval=None, payments=None):
     out, doc = _doc("Cedolino globale annuale")
     s = _styles()
     story=[Paragraph("Cedolino globale annuale", s["CMTitle"]), Paragraph(str(year), s["CMSub"]), _party_block(worker, employer, s), Spacer(1,7)]
@@ -228,26 +359,28 @@ def annual_payroll_pdf(worker, employer, annual, year, vacation, fiscal=None, ex
     t=Table(rows,colWidths=[15*mm,25*mm,31*mm,31*mm,30*mm,32*mm],repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),BRAND),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,PALE]),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#c8d8d2")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("FONTSIZE",(0,0),(-1,-1),7.2),("PADDING",(0,0),(-1,-1),4)]))
     story += [t, Paragraph("Totali annuali",s["CMSub"]), _kv_table([["Voce","Valore"],["Ore",str(annual["worked_hours"])],["Retribuzione registrata",_money(annual["gross"])],["Quota tredicesima maturata",_money(annual["thirteenth_accrual"])],["TFR maturato",_money(annual["tfr_accrual"])],["Totale corrispondibile registrato",_money(annual["payable"])]]), Paragraph("Ferie annuali",s["CMSub"]), _kv_table([["Ferie","Giorni"],["Maturate",str(vacation["accrued"])],["Maturabili entro 31/12",str(vacation["projected"])],["Godute/programmate",str(vacation["used_scheduled"])],["Disponibili",str(vacation["available_usable"])]]), Spacer(1,8), Paragraph("Prospetto gestionale annuale; non sostituisce gli adempimenti ufficiali.",s["CMNote"])]
-    story += _expense_story(expenses, s)
+    story += _expense_story(expenses, s, date(year, 12, 31))
     story += _fiscal_story(fiscal, s)
+    story += _payment_story(payments, s, annual.get("payable"), due_types={"salary"})
     story += _signature_story(worker, employer, s, approval)
     doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
     out.seek(0)
     return out
 
 
-def courtesy_cu_pdf(worker, employer, annual, year, fiscal=None, approval=None):
+def courtesy_cu_pdf(worker, employer, annual, year, fiscal=None, approval=None, payments=None):
     out, doc = _doc("Certificazione retribuzioni / CU di cortesia")
     s=_styles()
     story=[Paragraph("Certificazione retribuzioni · CU di cortesia",s["CMTitle"]),Paragraph(f"Anno fiscale {year}",s["CMSub"]),_party_block(worker,employer,s),Spacer(1,7),_kv_table([["Dati riepilogativi","Importo"],["Retribuzione registrata",_money(annual["gross"])],["Quota tredicesima maturata",_money(annual["thirteenth_accrual"])],["Rimborsi/anticipi netti registrati",_money(annual["reimbursements"])],["TFR maturato nell'anno (informativo)",_money(annual["tfr_accrual"])]]),Spacer(1,10),Paragraph("Natura del documento",s["CMSub"]),Paragraph("Il datore di lavoro domestico privato normalmente non opera come sostituto d'imposta. Questo PDF è una certificazione di cortesia delle somme risultanti nell'applicazione e non è il modello CU telematico dell'Agenzia delle Entrate. I dati devono essere verificati prima dell'uso fiscale.",s["CMBody"]),Spacer(1,8),Paragraph(f"Generato il {date.today().strftime('%d/%m/%Y')}",s["CMNote"])]
     story += _fiscal_story(fiscal, s)
+    story += _payment_story(payments, s)
     story += _signature_story(worker, employer, s, approval)
     doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
     out.seek(0)
     return out
 
 
-def tfr_annual_pdf(worker, employer, tfr, year, rule_notes, fiscal=None, approval=None):
+def tfr_annual_pdf(worker, employer, tfr, year, rule_notes, fiscal=None, approval=None, payments=None):
     out,doc=_doc("Prospetto TFR annuale")
     s=_styles()
     story=[Paragraph("Prospetto TFR annuale",s["CMTitle"]),Paragraph(f"Anno {year} · calcolo fino al {tfr['cutoff'].strftime('%d/%m/%Y')}",s["CMSub"]),_party_block(worker,employer,s),Spacer(1,7),_kv_table([["Calcolo quota annuale","Valore"],["Retribuzione registrata utile",_money(tfr["gross"])],["Quota tredicesima maturata",_money(tfr["thirteenth_accrual"])],["Base utile TFR stimata",_money(tfr["tfr_useful_compensation"])],["Divisore", "13,5"],["Quota TFR maturata nell'anno",_money(tfr["tfr_accrual"])]]),Paragraph("Regole applicate",s["CMSub"])]
@@ -255,13 +388,14 @@ def tfr_annual_pdf(worker, employer, tfr, year, rule_notes, fiscal=None, approva
         story.append(Paragraph("• " + note, s["CMBody"]))
     story += [Spacer(1,7),Paragraph(tfr["revaluation_note"],s["CMNote"]),Spacer(1,5),Paragraph("Il prospetto calcola la quota maturata nell'anno sui dati registrati. Eventuali anticipazioni, liquidazioni pregresse, rivalutazioni di quote precedenti e trattamento fiscale devono essere riconciliati prima del pagamento.",s["CMNote"])]
     story += _fiscal_story(fiscal, s)
+    story += _payment_story(payments, s, tfr.get("tfr_accrual"), "Liquidazioni TFR", {"tfr"})
     story += _signature_story(worker, employer, s, approval)
     doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
     out.seek(0)
     return out
 
 
-def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approval=None):
+def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approval=None, payments=None):
     out,doc=_doc("Andamento ore e retribuzioni")
     s=_styles()
     story=[Paragraph("Andamento ore e retribuzioni",s["CMTitle"]),Paragraph(str(year),s["CMSub"]),_party_block(worker,employer,s),Spacer(1,8)]
@@ -286,8 +420,9 @@ def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approv
     t=Table(rows,colWidths=[35*mm,35*mm,45*mm,45*mm],repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),BRAND),("TEXTCOLOR",(0,0),(-1,0),colors.white),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,PALE]),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#c8d8d2")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("FONTSIZE",(0,0),(-1,-1),7.5),("PADDING",(0,0),(-1,-1),4)]))
     story += [t,Spacer(1,8),Paragraph(f"Totale ore: {annual['worked_hours']} · Retribuzione registrata: {_money(annual['gross'])}",s["CMBody"])]
-    story += _expense_story(expenses, s)
+    story += _expense_story(expenses, s, date(year, 12, 31))
     story += _fiscal_story(fiscal, s)
+    story += _payment_story(payments, s)
     story += _signature_story(worker, employer, s, approval)
     doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
     out.seek(0)
@@ -296,7 +431,7 @@ def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approv
 
 
 
-def location_trend_pdf(worker, employer, location_data, year, approval=None):
+def location_trend_pdf(worker, employer, location_data, year, approval=None, payments=None):
     out, doc = _doc("Andamento ore per luogo")
     s = _styles()
     story = [
@@ -339,12 +474,13 @@ def location_trend_pdf(worker, employer, location_data, year, approval=None):
             ("PADDING", (0, 0), (-1, -1), 2.2),
         ]))
         story.append(detail)
+    story += _payment_story(payments, s)
     story += _signature_story(worker, employer, s, approval)
     doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
     out.seek(0)
     return out
 
-def thirteenth_payroll_pdf(worker, employer, thirteenth, year, rule_notes, fiscal=None, approval=None):
+def thirteenth_payroll_pdf(worker, employer, thirteenth, year, rule_notes, fiscal=None, approval=None, payments=None):
     out, doc = _doc("Cedolino tredicesima")
     s = _styles()
     story = [Paragraph("Cedolino della tredicesima", s["CMTitle"]), Paragraph(f"Anno {year} · calcolo fino al {thirteenth['cutoff'].strftime('%d/%m/%Y')}", s["CMSub"]), _party_block(worker, employer, s), Spacer(1,7)]
@@ -352,6 +488,7 @@ def thirteenth_payroll_pdf(worker, employer, thirteenth, year, rule_notes, fisca
     for note in rule_notes:
         story.append(Paragraph("• " + note, s["CMBody"]))
     story += _fiscal_story(fiscal, s)
+    story += _payment_story(payments, s, thirteenth.get("thirteenth"), "Liquidazioni tredicesima", {"thirteenth"})
     story += [Spacer(1,7), Paragraph("Documento gestionale: verificare minimi contrattuali, elementi retributivi utili e disciplina vigente prima del pagamento.",s["CMNote"])]
     story += _signature_story(worker, employer, s, approval)
     doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
@@ -359,7 +496,7 @@ def thirteenth_payroll_pdf(worker, employer, thirteenth, year, rule_notes, fisca
     return out
 
 
-def combined_thirteenth_tfr_pdf(worker, employer, combined, year, rule_notes, approval=None):
+def combined_thirteenth_tfr_pdf(worker, employer, combined, year, rule_notes, approval=None, payments=None):
     out, doc = _doc("Tredicesima + TFR")
     s = _styles()
     th = combined["thirteenth"]
@@ -369,6 +506,7 @@ def combined_thirteenth_tfr_pdf(worker, employer, combined, year, rule_notes, ap
         story.append(Paragraph("• " + note, s["CMBody"]))
     story += _fiscal_story({"inps":combined.get("inps"),"taxes":combined.get("taxes")},s)
     story += [Paragraph(tfr["revaluation_note"],s["CMNote"]),Paragraph("Il totale non costituisce automaticamente importo netto da pagare: eventuali anticipi TFR, quote già liquidate, contribuzione e imposizione fiscale vanno riconciliati.",s["CMNote"])]
+    story += _payment_story(payments, s, combined["thirteenth"]["thirteenth"] + combined["tfr"]["tfr_accrual"], "Liquidazioni tredicesima e TFR", {"thirteenth", "tfr"})
     story += _signature_story(worker, employer, s, approval)
     doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
     out.seek(0)

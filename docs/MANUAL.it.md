@@ -84,6 +84,14 @@ Il calendario utilizza una vista settimanale a scala oraria: ogni registrazione 
 
 Le tariffe orarie e le spese dispongono di storico completo con inserimento, modifica e cancellazione. Le spese del lavoratore o del datore vengono riportate nei cedolini/report nel mese in cui sono state registrate.
 
+## Novità r57: compensazioni, riporto e rateizzazione di spese e rimborsi
+
+Ogni spesa o anticipo mantiene un saldo. È possibile registrare più compensazioni parziali, in contanti, con bonifico, carta, altro metodo elettronico o altro metodo. La documentazione è facoltativa: una compensazione in contanti può essere registrata anche senza ricevuta, restando comunque tracciata nel sistema con data, importo, modalità, note e audit. Il sistema impedisce di compensare oltre il saldo ancora disponibile.
+
+Il residuo può essere lasciato nel cedolino del mese della spesa, riportato integralmente a un mese successivo oppure rateizzato su più mesi. La rateizzazione può essere definita indicando il numero di rate oppure un importo rata; l'ultima rata assorbe automaticamente l'eventuale differenza. Quando esiste un piano di riporto/rateizzazione, sono ammesse anche compensazioni manuali nei mesi successivi e queste riducono le quote future ancora aperte.
+
+Quando un cedolino mensile viene generato, la quota del piano inclusa in quel cedolino viene consolidata. Le quote consolidate non possono essere compensate o riscritte una seconda volta; le sole quote future non consolidate restano modificabili e possono essere ripianificate. Nei report sono distinti importo originario, compensazioni manuali, quote già regolate tramite cedolino e residuo aperto.
+
 La pagina **Impostazioni** (icona ingranaggio) raccoglie il limite degli inserimenti rapidi, la configurazione SMTP/SMTPS e i metodi di autenticazione disponibili. Documenti, report archiviati e notifiche possono essere inviati via e-mail direttamente dall'applicazione.
 
 
@@ -116,3 +124,14 @@ Lavoratori e datori dispongono ora dei campi Città, Provincia e CAP. Nei report
 ## Novità r48: sottoscrizioni calendario e impostazioni
 
 In **Impostazioni** è possibile configurare la URL esterna dell'applicazione e attivare una sottoscrizione in sola lettura per il calendario di un singolo lavoratore o di un datore di lavoro. Per ogni calendario attivato vengono mostrati un link **ICS** e un endpoint **CalDAV** protetti da token casuale revocabile. Il calendario del datore aggrega gli eventi dei lavoratori associati. I feed includono ore retribuite, ferie e malattia. Il cambio password personale è ora integrato nella stessa pagina Impostazioni.
+
+## Firme grafiche nei report
+Nelle anagrafiche di lavoratore e datore di lavoro è possibile caricare una firma grafica in formato PNG, JPEG, TIFF, WEBP o BMP. Quando il report prevede la firma del soggetto e la firma è registrata, l'immagine viene apposta automaticamente nello spazio firma; in assenza del file resta la linea per la firma manuale. Tutti i PDF riportano inoltre logo di colf-manager, versione/build e autore.
+
+## Pagamenti e quietanze
+La voce Pagamenti consente di registrare retribuzioni, contributi INPS, tredicesima, TFR, rimborsi spese e altri pagamenti. Ogni voce può essere Da pagare o Pagato e può includere data di pagamento, periodo di competenza, descrizione, note e allegati quali quietanze PDF o immagini. I contributi INPS sono disponibili solo per i lavoratori con posizione INPS registrata.
+
+La generazione del cedolino mensile crea automaticamente una voce residua Da pagare per la retribuzione e, quando disponibile il calcolo INPS, una voce contributiva. Le quote già registrate come Pagato vengono mostrate nei report e concorrono al calcolo del residuo. Rigenerare un report aggiorna la voce automatica residua invece di duplicarla.
+
+## Archivio report e backup
+Dopo la generazione da interfaccia, la pagina Report viene aggiornata automaticamente e il nuovo documento compare subito nell'archivio. I report archiviati possono essere visualizzati nel browser, scaricati, inviati via e-mail o eliminati. L'export completo include database, documenti, report, firme grafiche, pagamenti e relativi allegati; l'import completo ripristina gli stessi elementi e i collegamenti fra loro.

@@ -37,6 +37,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
+from PIL import Image as PILImage, UnidentifiedImageError
 
 from .calculations import (
     annual_summary,
@@ -59,9 +60,13 @@ from .models import (
     Document,
     GeneratedReport,
     Expense,
+    ExpenseRecoveryAllocation,
+    ExpenseSettlement,
     Employer,
     HourlyRate,
     Location,
+    Payment,
+    PaymentAttachment,
     Setting,
     User,
     WorkEntry,
@@ -94,6 +99,10 @@ ALLOWED_UPLOADS = {
     ".png": {"image/png"},
     ".jpg": {"image/jpeg"},
     ".jpeg": {"image/jpeg"},
+    ".webp": {"image/webp"},
+    ".tif": {"image/tiff"},
+    ".tiff": {"image/tiff"},
+    ".bmp": {"image/bmp"},
 }
 
 
@@ -268,6 +277,9 @@ def _ensure_legacy_schema_compatibility():
             "city": "VARCHAR(120)",
             "province": "VARCHAR(2)",
             "postal_code": "VARCHAR(10)",
+            "signature_stored_name": "VARCHAR(255)",
+            "signature_filename": "VARCHAR(255)",
+            "signature_mime_type": "VARCHAR(120)",
         }
         for column, ddl in additions.items():
             if column not in columns:
@@ -295,6 +307,9 @@ def _ensure_legacy_schema_compatibility():
             "contract_number": "VARCHAR(100)",
             "contract_type": "VARCHAR(20) NOT NULL DEFAULT 'permanent'",
             "employer_covers_all_taxes": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "signature_stored_name": "VARCHAR(255)",
+            "signature_filename": "VARCHAR(255)",
+            "signature_mime_type": "VARCHAR(120)",
             "notes": "TEXT",
         }
         for column, ddl in additions.items():
@@ -372,6 +387,8 @@ def create_app(test_config=None):
         DOCUMENT_MAX_BYTES=int(os.getenv("COLF_MANAGER_MAX_UPLOAD_BYTES", str(16 * 1024 * 1024))),
         UPLOAD_FOLDER=str(data_dir / "documents"),
         REPORT_FOLDER=str(data_dir / "reports"),
+        SIGNATURE_FOLDER=str(data_dir / "signatures"),
+        PAYMENT_FOLDER=str(data_dir / "payments"),
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=_bool_env("COLF_MANAGER_SECURE_COOKIES", production),
@@ -388,6 +405,8 @@ def create_app(test_config=None):
 
     Path(app.config["UPLOAD_FOLDER"]).mkdir(parents=True, exist_ok=True)
     Path(app.config["REPORT_FOLDER"]).mkdir(parents=True, exist_ok=True)
+    Path(app.config["SIGNATURE_FOLDER"]).mkdir(parents=True, exist_ok=True)
+    Path(app.config["PAYMENT_FOLDER"]).mkdir(parents=True, exist_ok=True)
     db.init_app(app)
     Migrate(app, db)
     CSRFProtect(app)
@@ -412,6 +431,62 @@ def create_app(test_config=None):
     @login.user_loader
     def load_user(user_id):
         return db.session.get(User, int(user_id))
+
+    def _validated_upload(file_storage, *, images_only=False):
+        if not file_storage or not file_storage.filename:
+            raise ValueError("Selezionare un file")
+        safe = secure_filename(file_storage.filename)
+        suffix = Path(safe).suffix.lower()
+        allowed = {k: v for k, v in ALLOWED_UPLOADS.items() if not images_only or k != ".pdf"}
+        if suffix not in allowed:
+            raise ValueError("Tipo file non consentito")
+        payload = file_storage.read()
+        if not payload:
+            raise ValueError("Il file è vuoto")
+        if len(payload) > app.config["DOCUMENT_MAX_BYTES"]:
+            raise ValueError("Il file supera la dimensione massima consentita")
+        mime = file_storage.mimetype or "application/octet-stream"
+        if mime not in allowed[suffix]:
+            raise ValueError("MIME type non consentito")
+        if suffix == ".pdf":
+            if not payload.startswith(b"%PDF-"):
+                raise ValueError("Il contenuto del file non corrisponde all'estensione")
+        else:
+            try:
+                image = PILImage.open(BytesIO(payload))
+                image.verify()
+            except (UnidentifiedImageError, OSError, ValueError) as exc:
+                raise ValueError("Immagine non valida") from exc
+        return safe, suffix, mime, payload
+
+    def _update_signature(person, kind):
+        remove = request.form.get("remove_signature") == "1"
+        uploaded = request.files.get("signature")
+        old_stored = getattr(person, "signature_stored_name", None)
+        if remove:
+            person.signature_stored_name = None
+            person.signature_filename = None
+            person.signature_mime_type = None
+            if old_stored:
+                safe_unlink(Path(app.config["SIGNATURE_FOLDER"]) / old_stored)
+            return
+        if not uploaded or not uploaded.filename:
+            return
+        safe, _, mime, payload = _validated_upload(uploaded, images_only=True)
+        stored = f"{kind}-{uuid4().hex}-{safe}"
+        (Path(app.config["SIGNATURE_FOLDER"]) / stored).write_bytes(payload)
+        person.signature_stored_name = stored
+        person.signature_filename = safe
+        person.signature_mime_type = mime
+        if old_stored and old_stored != stored:
+            safe_unlink(Path(app.config["SIGNATURE_FOLDER"]) / old_stored)
+
+    def _signature_path(person):
+        stored = getattr(person, "signature_stored_name", None) if person else None
+        if not stored:
+            return None
+        path = Path(app.config["SIGNATURE_FOLDER"]) / stored
+        return str(path) if path.is_file() else None
 
     def audit(action, object_type=None, object_id=None, details=None, user_id=None):
         try:
@@ -692,6 +767,7 @@ def create_app(test_config=None):
         if request.method == "POST":
             try:
                 w = _worker_from_form()
+                _update_signature(w, "worker")
                 db.session.add(w)
                 db.session.flush()
                 if request.form.get("hourly_rate"):
@@ -722,6 +798,7 @@ def create_app(test_config=None):
         if request.method == "POST":
             try:
                 _worker_from_form(worker)
+                _update_signature(worker, "worker")
                 db.session.commit()
                 audit("worker_updated", "worker", worker.id)
                 flash("Dati del lavoratore aggiornati", "success")
@@ -730,6 +807,20 @@ def create_app(test_config=None):
                 db.session.rollback()
                 flash(str(exc) if isinstance(exc, ValueError) else "Dati non validi", "error")
         return render_template("worker_edit.html", worker=worker, employers=Employer.query.order_by(Employer.last_name).all())
+
+    @app.get("/workers/<int:worker_id>/signature")
+    @login_required
+    def worker_signature(worker_id):
+        worker = db.get_or_404(Worker, worker_id)
+        if not worker.signature_stored_name:
+            abort(404)
+        return send_from_directory(
+            app.config["SIGNATURE_FOLDER"],
+            worker.signature_stored_name,
+            as_attachment=False,
+            download_name=worker.signature_filename or worker.signature_stored_name,
+            mimetype=worker.signature_mime_type,
+        )
 
     @app.post("/workers/<int:worker_id>/delete")
     @login_required
@@ -740,11 +831,29 @@ def create_app(test_config=None):
             return redirect(url_for("worker_detail", worker_id=worker.id))
         documents = Document.query.filter_by(worker_id=worker.id).all()
         reports = GeneratedReport.query.filter_by(worker_id=worker.id).all()
+        expenses_to_delete = Expense.query.filter_by(worker_id=worker.id).all()
+        settlement_files = [
+            settlement.stored_name
+            for expense in expenses_to_delete
+            for settlement in expense.settlements
+            if settlement.stored_name
+        ]
+        payments = Payment.query.filter_by(worker_id=worker.id).all()
+        payment_ids = [payment.id for payment in payments]
+        attachments = PaymentAttachment.query.filter(PaymentAttachment.payment_id.in_(payment_ids)).all() if payment_ids else []
         for document in documents:
             safe_unlink(Path(app.config["UPLOAD_FOLDER"]) / document.stored_name)
         for report in reports:
             safe_unlink(Path(app.config["REPORT_FOLDER"]) / report.stored_name)
-        for model in (WorkEntry, Absence, Expense, Document, GeneratedReport, HourlyRate):
+        for stored_name in settlement_files:
+            safe_unlink(Path(app.config["UPLOAD_FOLDER"]) / stored_name)
+        for attachment in attachments:
+            safe_unlink(Path(app.config["PAYMENT_FOLDER"]) / attachment.stored_name)
+        if worker.signature_stored_name:
+            safe_unlink(Path(app.config["SIGNATURE_FOLDER"]) / worker.signature_stored_name)
+        if payment_ids:
+            PaymentAttachment.query.filter(PaymentAttachment.payment_id.in_(payment_ids)).delete(synchronize_session=False)
+        for model in (WorkEntry, Absence, Expense, Document, GeneratedReport, Payment, HourlyRate):
             model.query.filter_by(worker_id=worker.id).delete(synchronize_session=False)
         db.session.delete(worker)
         db.session.commit()
@@ -775,6 +884,7 @@ def create_app(test_config=None):
         if request.method == "POST":
             try:
                 employer = _employer_from_form()
+                _update_signature(employer, "employer")
                 db.session.add(employer)
                 db.session.commit()
                 audit("employer_created", "employer", employer.id)
@@ -798,6 +908,7 @@ def create_app(test_config=None):
         if request.method == "POST":
             try:
                 _employer_from_form(employer)
+                _update_signature(employer, "employer")
                 db.session.commit()
                 audit("employer_updated", "employer", employer.id)
                 flash("Dati del datore di lavoro aggiornati", "success")
@@ -807,6 +918,20 @@ def create_app(test_config=None):
                 flash(str(exc), "error")
         return render_template("employer_edit.html", employer=employer)
 
+    @app.get("/employers/<int:employer_id>/signature")
+    @login_required
+    def employer_signature(employer_id):
+        employer = db.get_or_404(Employer, employer_id)
+        if not employer.signature_stored_name:
+            abort(404)
+        return send_from_directory(
+            app.config["SIGNATURE_FOLDER"],
+            employer.signature_stored_name,
+            as_attachment=False,
+            download_name=employer.signature_filename or employer.signature_stored_name,
+            mimetype=employer.signature_mime_type,
+        )
+
     @app.post("/employers/<int:employer_id>/delete")
     @login_required
     def employer_delete(employer_id):
@@ -815,6 +940,9 @@ def create_app(test_config=None):
             flash("Digitare DELETE per confermare la cancellazione totale", "error")
             return redirect(url_for("employer_detail", employer_id=employer.id))
         Worker.query.filter_by(employer_id=employer.id).update({"employer_id": None}, synchronize_session=False)
+        Payment.query.filter_by(employer_id=employer.id).update({"employer_id": None}, synchronize_session=False)
+        if employer.signature_stored_name:
+            safe_unlink(Path(app.config["SIGNATURE_FOLDER"]) / employer.signature_stored_name)
         db.session.delete(employer)
         db.session.commit()
         audit("employer_deleted", "employer", employer_id)
@@ -1384,6 +1512,86 @@ def create_app(test_config=None):
             flash(str(exc), "error")
         return redirect(url_for("calendar"))
 
+    def _month_start(value):
+        if isinstance(value, date):
+            return date(value.year, value.month, 1)
+        try:
+            year_text, month_text = (value or "").split("-", 1)
+            year, month = int(year_text), int(month_text)
+            if month < 1 or month > 12:
+                raise ValueError
+            return date(year, month, 1)
+        except (TypeError, ValueError):
+            raise ValueError("Mese non valido; usare YYYY-MM") from None
+
+    def _add_months(value, months):
+        index = value.year * 12 + value.month - 1 + months
+        return date(index // 12, index % 12 + 1, 1)
+
+    def _expense_balance(expense):
+        amount = Decimal(expense.amount)
+        settlements = list(getattr(expense, "settlements", []) or [])
+        allocations = list(getattr(expense, "recovery_allocations", []) or [])
+        if expense.reimbursed and not settlements and not allocations:
+            settled = amount
+            payroll_allocated = Decimal("0")
+            residual = Decimal("0")
+            status = "Regolata (storico)"
+        else:
+            settled = sum((Decimal(item.amount) for item in settlements), Decimal("0"))
+            payroll_allocated = sum(
+                (Decimal(item.amount) for item in allocations if item.locked_at), Decimal("0")
+            )
+            residual = max(Decimal("0"), amount - settled - payroll_allocated)
+            if residual == 0 and settled and payroll_allocated:
+                status = "Regolazione mista"
+            elif residual == 0 and payroll_allocated:
+                status = "Regolata tramite cedolino"
+            elif residual == 0:
+                status = "Compensata manualmente"
+            elif allocations and any(not item.locked_at for item in allocations):
+                status = "Rateizzata / riportata"
+            elif settled:
+                status = "Parzialmente compensata"
+            else:
+                status = "Da regolare"
+        planned = min(
+            residual,
+            sum(
+                (Decimal(item.amount) for item in allocations if not item.locked_at),
+                Decimal("0"),
+            ),
+        )
+        return (
+            settled.quantize(Decimal("0.01")),
+            payroll_allocated.quantize(Decimal("0.01")),
+            planned.quantize(Decimal("0.01")),
+            residual.quantize(Decimal("0.01")),
+            status,
+        )
+
+    def _decorate_expense(expense):
+        settled, payroll_allocated, planned, residual, status = _expense_balance(expense)
+        expense.manual_settled = settled
+        expense.payroll_allocated = payroll_allocated
+        expense.planned_recovery = planned
+        expense.residual_amount = residual
+        expense.balance_status = status
+        return expense
+
+    def _expense_relevant_to_period(expense, period_start, period_end):
+        if period_start <= expense.expense_date <= period_end:
+            return True
+        if any(
+            period_start <= item.due_month <= period_end
+            for item in getattr(expense, "recovery_allocations", [])
+        ):
+            return True
+        return any(
+            period_start <= item.settlement_date <= period_end
+            for item in getattr(expense, "settlements", [])
+        )
+
     @app.route("/expenses", methods=["GET", "POST"])
     @login_required
     def expenses():
@@ -1392,27 +1600,41 @@ def create_app(test_config=None):
                 direction = request.form["direction"]
                 if direction not in {"employer_advance", "worker_advance"}:
                     raise ValueError("Direzione non valida")
+                description = request.form["description"].strip()[:255]
+                if not description:
+                    raise ValueError("Descrizione obbligatoria")
                 expense = Expense(
                     worker_id=int(request.form["worker_id"]),
                     expense_date=parse_date(request.form["expense_date"], "Data"),
-                    description=request.form["description"].strip()[:255],
+                    description=description,
                     amount=nonnegative_decimal(request.form["amount"], "Importo"),
                     direction=direction,
-                    reimbursed="reimbursed" in request.form,
+                    reimbursed=False,
                 )
                 db.session.add(expense)
                 db.session.commit()
                 audit("expense_created", "expense", expense.id)
                 flash("Spesa registrata", "success")
                 return redirect(url_for("expenses"))
-            except ValueError as exc:
+            except (ValueError, KeyError, TypeError) as exc:
                 db.session.rollback()
                 flash(str(exc), "error")
+        expense_rows = [
+            _decorate_expense(item)
+            for item in Expense.query.order_by(Expense.expense_date.desc(), Expense.id.desc()).all()
+        ]
         return render_template(
             "expenses.html",
             workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
-            expenses=Expense.query.order_by(Expense.expense_date.desc(), Expense.id.desc()).all(),
+            expenses=expense_rows,
         )
+
+    @app.get("/expenses/<int:expense_id>")
+    @login_required
+    def expense_detail(expense_id):
+        expense = _decorate_expense(db.get_or_404(Expense, expense_id))
+        worker = db.session.get(Worker, expense.worker_id)
+        return render_template("expense_detail.html", expense=expense, worker=worker)
 
     @app.route("/expenses/<int:expense_id>/edit", methods=["GET", "POST"])
     @login_required
@@ -1423,34 +1645,502 @@ def create_app(test_config=None):
                 direction = request.form["direction"]
                 if direction not in {"employer_advance", "worker_advance"}:
                     raise ValueError("Direzione non valida")
-                expense.worker_id = int(request.form["worker_id"])
-                expense.expense_date = parse_date(request.form["expense_date"], "Data")
-                expense.description = request.form["description"].strip()[:255]
-                expense.amount = nonnegative_decimal(request.form["amount"], "Importo")
+                new_amount = nonnegative_decimal(request.form["amount"], "Importo")
+                settled = sum((Decimal(item.amount) for item in expense.settlements), Decimal("0"))
+                locked = sum(
+                    (Decimal(item.amount) for item in expense.recovery_allocations if item.locked_at),
+                    Decimal("0"),
+                )
+                if new_amount < settled + locked:
+                    raise ValueError(
+                        "L'importo non può essere inferiore alle compensazioni e quote cedolino già registrate"
+                    )
+                description = request.form["description"].strip()[:255]
+                if not description:
+                    raise ValueError("Descrizione obbligatoria")
+                new_worker_id = int(request.form["worker_id"])
+                new_expense_date = parse_date(request.form["expense_date"], "Data")
+                if (expense.settlements or expense.recovery_allocations) and new_worker_id != expense.worker_id:
+                    raise ValueError("Non è possibile cambiare lavoratore dopo compensazioni o pianificazioni")
+                if (expense.settlements or expense.recovery_allocations) and direction != expense.direction:
+                    raise ValueError("Non è possibile cambiare direzione dopo compensazioni o pianificazioni")
+                if any(item.settlement_date < new_expense_date for item in expense.settlements):
+                    raise ValueError("La nuova data renderebbe non valide le compensazioni già registrate")
+                new_month_start = date(new_expense_date.year, new_expense_date.month, 1)
+                if any(item.due_month < new_month_start for item in expense.recovery_allocations):
+                    raise ValueError("La nuova data renderebbe non valido il piano di recupero")
+                expense.worker_id = new_worker_id
+                expense.expense_date = new_expense_date
+                expense.description = description
+                expense.amount = new_amount
                 expense.direction = direction
-                expense.reimbursed = "reimbursed" in request.form
                 db.session.commit()
                 audit("expense_updated", "expense", expense.id)
                 flash("Spesa aggiornata", "success")
-                return redirect(url_for("expenses"))
-            except ValueError as exc:
+                return redirect(url_for("expense_detail", expense_id=expense.id))
+            except (ValueError, KeyError, TypeError) as exc:
                 db.session.rollback()
                 flash(str(exc), "error")
         return render_template(
             "expense_edit.html",
-            expense=expense,
+            expense=_decorate_expense(expense),
             workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
         )
+
+    @app.post("/expenses/<int:expense_id>/recovery-plan")
+    @login_required
+    def expense_recovery_plan(expense_id):
+        expense = db.get_or_404(Expense, expense_id)
+        try:
+            mode = (request.form.get("mode") or "current_month").strip()
+            if mode not in {"current_month", "carry_forward", "installments"}:
+                raise ValueError("Modalità di recupero non valida")
+            locked_allocations = [
+                item for item in expense.recovery_allocations if item.locked_at
+            ]
+            latest_locked = max(
+                (item.due_month for item in locked_allocations), default=None
+            )
+            locked_total = sum(
+                (Decimal(item.amount) for item in locked_allocations), Decimal("0")
+            )
+            expense_month_start = date(expense.expense_date.year, expense.expense_date.month, 1)
+            already_archived = GeneratedReport.query.filter(
+                GeneratedReport.worker_id == expense.worker_id,
+                GeneratedReport.report_type == "monthly_payroll",
+                GeneratedReport.period_start <= expense_month_start,
+                GeneratedReport.period_end >= expense_month_start,
+            ).first()
+            if already_archived and not expense.recovery_allocations:
+                raise ValueError(
+                    "Il cedolino del mese originario è già stato generato; il residuo non può essere ripianificato"
+                )
+            manual = sum((Decimal(item.amount) for item in expense.settlements), Decimal("0"))
+            residual = max(
+                Decimal("0"), Decimal(expense.amount) - manual - locked_total
+            )
+            if residual <= 0:
+                raise ValueError("La partita non ha residuo da pianificare")
+            if locked_allocations and mode == "current_month":
+                raise ValueError(
+                    "Esistono quote già consolidate: il residuo può solo essere riportato o rateizzato nei mesi successivi"
+                )
+
+            for allocation in list(expense.recovery_allocations):
+                if not allocation.locked_at:
+                    db.session.delete(allocation)
+            db.session.flush()
+
+            if mode != "current_month":
+                due_month = _month_start(request.form.get("start_month"))
+                minimum_month = (
+                    _add_months(latest_locked, 1)
+                    if latest_locked
+                    else _add_months(expense_month_start, 1)
+                )
+                if due_month < minimum_month:
+                    raise ValueError(
+                        f"Il piano deve iniziare da {minimum_month.strftime('%m/%Y')} o dopo"
+                    )
+                amounts = []
+                if mode == "carry_forward":
+                    amounts = [residual]
+                else:
+                    raw_installment = (request.form.get("installment_amount") or "").strip()
+                    raw_count = (request.form.get("installment_count") or "").strip()
+                    if raw_installment:
+                        installment = nonnegative_decimal(raw_installment, "Importo rata")
+                        if installment <= 0:
+                            raise ValueError("L'importo rata deve essere maggiore di zero")
+                        remaining = residual
+                        while remaining > 0:
+                            if len(amounts) >= 120:
+                                raise ValueError("Il piano non può superare 120 rate")
+                            quota = min(installment, remaining)
+                            amounts.append(quota.quantize(Decimal("0.01")))
+                            remaining -= quota
+                    else:
+                        try:
+                            count = int(raw_count)
+                        except (TypeError, ValueError):
+                            raise ValueError(
+                                "Indicare il numero di rate oppure l'importo della rata"
+                            ) from None
+                        if count < 1 or count > 120:
+                            raise ValueError("Il numero di rate deve essere compreso tra 1 e 120")
+                        base = (residual / Decimal(count)).quantize(Decimal("0.01"))
+                        remaining = residual
+                        for index in range(count):
+                            quota = remaining if index == count - 1 else min(base, remaining)
+                            amounts.append(quota.quantize(Decimal("0.01")))
+                            remaining -= quota
+                for index, quota in enumerate(amounts):
+                    if quota <= 0:
+                        continue
+                    db.session.add(
+                        ExpenseRecoveryAllocation(
+                            expense_id=expense.id,
+                            due_month=_add_months(due_month, index),
+                            amount=quota,
+                        )
+                    )
+            db.session.commit()
+            audit(
+                "expense_recovery_plan_updated",
+                "expense",
+                expense.id,
+                f"mode={mode}",
+            )
+            flash("Piano di recupero aggiornato", "success")
+        except (ValueError, KeyError, TypeError, IntegrityError) as exc:
+            db.session.rollback()
+            flash(str(exc) if isinstance(exc, ValueError) else "Piano non valido", "error")
+        return redirect(url_for("expense_detail", expense_id=expense.id))
+
+    @app.post("/expenses/<int:expense_id>/settlements")
+    @login_required
+    def expense_settlement_create(expense_id):
+        expense = db.get_or_404(Expense, expense_id)
+        stored_path = None
+        try:
+            amount = nonnegative_decimal(request.form.get("amount"), "Importo")
+            if amount <= 0:
+                raise ValueError("L'importo della compensazione deve essere maggiore di zero")
+            method = (request.form.get("method") or "cash").strip()
+            if method not in {"cash", "bank_transfer", "card", "electronic", "other"}:
+                raise ValueError("Modalità di compensazione non valida")
+            already = sum((Decimal(item.amount) for item in expense.settlements), Decimal("0"))
+            locked = sum(
+                (Decimal(item.amount) for item in expense.recovery_allocations if item.locked_at),
+                Decimal("0"),
+            )
+            if expense.reimbursed and not expense.settlements and not expense.recovery_allocations:
+                raise ValueError("La spesa risulta già regolata nello storico")
+            if already + locked + amount > Decimal(expense.amount):
+                raise ValueError("La compensazione supera il saldo ancora disponibile della spesa")
+            settlement_date = parse_date(request.form.get("settlement_date"), "Data compensazione")
+            expense_month_end = date(
+                expense.expense_date.year,
+                expense.expense_date.month,
+                monthrange(expense.expense_date.year, expense.expense_date.month)[1],
+            )
+            if settlement_date < expense.expense_date:
+                raise ValueError("La compensazione non può precedere la spesa")
+            if settlement_date > expense_month_end and not expense.recovery_allocations:
+                raise ValueError(
+                    "Per compensare nei mesi successivi occorre prima riportare o rateizzare il residuo"
+                )
+            latest_locked = max(
+                (item.due_month for item in expense.recovery_allocations if item.locked_at),
+                default=None,
+            )
+            if latest_locked and _month_start(settlement_date) <= latest_locked:
+                raise ValueError(
+                    "La compensazione non può modificare un mese già consolidato nel cedolino"
+                )
+            settlement = ExpenseSettlement(
+                expense_id=expense.id,
+                settlement_date=settlement_date,
+                amount=amount,
+                method=method,
+                notes=(request.form.get("notes") or "").strip() or None,
+                created_by_user_id=current_user.id,
+            )
+            uploaded = request.files.get("file")
+            if uploaded and uploaded.filename:
+                safe, suffix, mime, payload = _validated_upload(uploaded)
+                stored = f"expense-settlement-{uuid4().hex}{suffix}"
+                stored_path = Path(app.config["UPLOAD_FOLDER"]) / stored
+                stored_path.write_bytes(payload)
+                settlement.filename = safe
+                settlement.stored_name = stored
+                settlement.mime_type = mime
+                settlement.sha256 = hashlib.sha256(payload).hexdigest()
+                settlement.size_bytes = len(payload)
+            db.session.add(settlement)
+            db.session.commit()
+            audit(
+                "expense_settlement_created",
+                "expense_settlement",
+                settlement.id,
+                f"expense={expense.id}; amount={amount}; method={method}",
+            )
+            flash("Compensazione registrata", "success")
+        except (ValueError, OSError, KeyError, TypeError) as exc:
+            db.session.rollback()
+            if stored_path:
+                safe_unlink(stored_path)
+            flash(str(exc), "error")
+        return redirect(url_for("expense_detail", expense_id=expense.id))
+
+    @app.route("/expenses/<int:expense_id>/settlements/<int:settlement_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def expense_settlement_edit(expense_id, settlement_id):
+        expense = db.get_or_404(Expense, expense_id)
+        settlement = db.get_or_404(ExpenseSettlement, settlement_id)
+        if settlement.expense_id != expense.id:
+            abort(404)
+        if request.method == "POST":
+            try:
+                amount = nonnegative_decimal(request.form.get("amount"), "Importo")
+                if amount <= 0:
+                    raise ValueError("L'importo della compensazione deve essere maggiore di zero")
+                other = sum(
+                    (Decimal(item.amount) for item in expense.settlements if item.id != settlement.id),
+                    Decimal("0"),
+                )
+                locked = sum(
+                    (Decimal(item.amount) for item in expense.recovery_allocations if item.locked_at),
+                    Decimal("0"),
+                )
+                if other + locked + amount > Decimal(expense.amount):
+                    raise ValueError("La compensazione supera il saldo ancora disponibile della spesa")
+                method = (request.form.get("method") or "cash").strip()
+                if method not in {"cash", "bank_transfer", "card", "electronic", "other"}:
+                    raise ValueError("Modalità di compensazione non valida")
+                settlement_date = parse_date(request.form.get("settlement_date"), "Data compensazione")
+                expense_month_end = date(
+                    expense.expense_date.year,
+                    expense.expense_date.month,
+                    monthrange(expense.expense_date.year, expense.expense_date.month)[1],
+                )
+                if settlement_date < expense.expense_date:
+                    raise ValueError("La compensazione non può precedere la spesa")
+                if settlement_date > expense_month_end and not expense.recovery_allocations:
+                    raise ValueError(
+                        "Per compensare nei mesi successivi occorre prima riportare o rateizzare il residuo"
+                    )
+                latest_locked = max(
+                    (item.due_month for item in expense.recovery_allocations if item.locked_at),
+                    default=None,
+                )
+                if latest_locked and _month_start(settlement_date) <= latest_locked:
+                    raise ValueError(
+                        "La compensazione non può modificare un mese già consolidato nel cedolino"
+                    )
+                settlement.amount = amount
+                settlement.settlement_date = settlement_date
+                settlement.method = method
+                settlement.notes = (request.form.get("notes") or "").strip() or None
+                db.session.commit()
+                audit("expense_settlement_updated", "expense_settlement", settlement.id)
+                flash("Compensazione aggiornata", "success")
+                return redirect(url_for("expense_detail", expense_id=expense.id))
+            except (ValueError, KeyError, TypeError) as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+        return render_template("expense_settlement_edit.html", expense=_decorate_expense(expense), settlement=settlement)
+
+    @app.get("/expenses/<int:expense_id>/settlements/<int:settlement_id>/attachment")
+    @login_required
+    def expense_settlement_attachment(expense_id, settlement_id):
+        settlement = db.get_or_404(ExpenseSettlement, settlement_id)
+        if settlement.expense_id != expense_id or not settlement.stored_name:
+            abort(404)
+        audit("expense_settlement_attachment_downloaded", "expense_settlement", settlement.id)
+        return send_from_directory(app.config["UPLOAD_FOLDER"], settlement.stored_name, as_attachment=True, download_name=settlement.filename)
+
+    @app.post("/expenses/<int:expense_id>/settlements/<int:settlement_id>/delete")
+    @login_required
+    def expense_settlement_delete(expense_id, settlement_id):
+        settlement = db.get_or_404(ExpenseSettlement, settlement_id)
+        if settlement.expense_id != expense_id:
+            abort(404)
+        expense = db.get_or_404(Expense, expense_id)
+        latest_locked = max(
+            (item.due_month for item in expense.recovery_allocations if item.locked_at),
+            default=None,
+        )
+        if latest_locked and _month_start(settlement.settlement_date) <= latest_locked:
+            flash(
+                "La compensazione appartiene a un periodo già consolidato nel cedolino",
+                "error",
+            )
+            return redirect(url_for("expense_detail", expense_id=expense_id))
+        stored = settlement.stored_name
+        db.session.delete(settlement)
+        db.session.commit()
+        if stored:
+            safe_unlink(Path(app.config["UPLOAD_FOLDER"]) / stored)
+        audit("expense_settlement_deleted", "expense_settlement", settlement_id)
+        flash("Compensazione eliminata", "success")
+        return redirect(url_for("expense_detail", expense_id=expense_id))
 
     @app.post("/expenses/<int:expense_id>/delete")
     @login_required
     def expense_delete(expense_id):
         expense = db.get_or_404(Expense, expense_id)
+        files_to_remove = [item.stored_name for item in expense.settlements if item.stored_name]
         db.session.delete(expense)
         db.session.commit()
+        for stored in files_to_remove:
+            safe_unlink(Path(app.config["UPLOAD_FOLDER"]) / stored)
         audit("expense_deleted", "expense", expense_id)
         flash("Spesa eliminata", "success")
         return redirect(url_for("expenses"))
+
+    def _payment_from_form(payment=None):
+        payment = payment or Payment()
+        worker_id = request.form.get("worker_id", type=int)
+        worker = db.session.get(Worker, worker_id) if worker_id else None
+        if not worker:
+            raise ValueError("Lavoratore non valido")
+        payment_type = (request.form.get("payment_type") or "").strip()
+        if payment_type not in {"salary", "inps_contributions", "thirteenth", "tfr", "expense_refund", "other"}:
+            raise ValueError("Tipo di pagamento non valido")
+        if payment_type == "inps_contributions" and not worker.inps_number:
+            raise ValueError("I contributi INPS sono disponibili solo se è registrata la posizione INPS del lavoratore")
+        status = (request.form.get("status") or "pending").strip()
+        if status not in {"pending", "paid"}:
+            raise ValueError("Stato pagamento non valido")
+        payment.worker_id = worker.id
+        payment.employer_id = worker.employer_id
+        payment.payment_type = payment_type
+        payment.amount = nonnegative_decimal(request.form.get("amount"), "Importo")
+        payment.status = status
+        raw_payment_date = (request.form.get("payment_date") or "").strip()
+        payment.payment_date = _optional_date(raw_payment_date, "Data pagamento") if raw_payment_date else None
+        if status == "paid" and payment.payment_date is None:
+            payment.payment_date = date.today()
+        if status == "pending":
+            payment.payment_date = None
+        payment.period_start = _optional_date(request.form.get("period_start"), "Inizio periodo")
+        payment.period_end = _optional_date(request.form.get("period_end"), "Fine periodo")
+        if payment.period_start and payment.period_end and payment.period_end < payment.period_start:
+            raise ValueError("La fine del periodo non può precedere l'inizio")
+        payment.description = (request.form.get("description") or "").strip()[:255] or None
+        payment.notes = (request.form.get("notes") or "").strip() or None
+        return payment
+
+    def _add_payment_attachments(payment):
+        added = []
+        for uploaded in request.files.getlist("attachments"):
+            if not uploaded or not uploaded.filename:
+                continue
+            safe, _, mime, payload = _validated_upload(uploaded, images_only=False)
+            stored = f"payment-{payment.id}-{uuid4().hex}-{safe}"
+            (Path(app.config["PAYMENT_FOLDER"]) / stored).write_bytes(payload)
+            attachment = PaymentAttachment(
+                payment_id=payment.id,
+                filename=safe,
+                stored_name=stored,
+                mime_type=mime,
+                sha256=hashlib.sha256(payload).hexdigest(),
+                size_bytes=len(payload),
+            )
+            db.session.add(attachment)
+            added.append(attachment)
+        return added
+
+    @app.route("/payments", methods=["GET", "POST"])
+    @login_required
+    def payments():
+        if request.method == "POST":
+            try:
+                payment = _payment_from_form()
+                db.session.add(payment)
+                db.session.flush()
+                _add_payment_attachments(payment)
+                db.session.commit()
+                audit("payment_created", "payment", payment.id, payment.payment_type)
+                flash("Pagamento registrato", "success")
+                return redirect(url_for("payment_detail", payment_id=payment.id))
+            except (ValueError, OSError) as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+        worker_id = request.args.get("worker_id", type=int)
+        query = Payment.query
+        if worker_id:
+            query = query.filter_by(worker_id=worker_id)
+        rows = query.order_by(Payment.created_at.desc(), Payment.id.desc()).all()
+        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
+        return render_template(
+            "payments.html",
+            payments=rows,
+            workers=workers,
+            payment_labels=PAYMENT_LABELS,
+            selected_worker=worker_id,
+            today=date.today().isoformat(),
+        )
+
+    @app.get("/payments/<int:payment_id>")
+    @login_required
+    def payment_detail(payment_id):
+        payment = db.get_or_404(Payment, payment_id)
+        worker = db.session.get(Worker, payment.worker_id)
+        employer = db.session.get(Employer, payment.employer_id) if payment.employer_id else None
+        attachments = PaymentAttachment.query.filter_by(payment_id=payment.id).order_by(PaymentAttachment.uploaded_at).all()
+        report = db.session.get(GeneratedReport, payment.source_report_id) if payment.source_report_id else None
+        return render_template(
+            "payment_detail.html",
+            payment=payment,
+            worker=worker,
+            employer=employer,
+            attachments=attachments,
+            source_report=report,
+            payment_labels=PAYMENT_LABELS,
+        )
+
+    @app.route("/payments/<int:payment_id>/edit", methods=["GET", "POST"])
+    @login_required
+    def payment_edit(payment_id):
+        payment = db.get_or_404(Payment, payment_id)
+        if request.method == "POST":
+            try:
+                _payment_from_form(payment)
+                _add_payment_attachments(payment)
+                db.session.commit()
+                audit("payment_updated", "payment", payment.id, payment.payment_type)
+                flash("Pagamento aggiornato", "success")
+                return redirect(url_for("payment_detail", payment_id=payment.id))
+            except (ValueError, OSError) as exc:
+                db.session.rollback()
+                flash(str(exc), "error")
+        return render_template(
+            "payment_edit.html",
+            payment=payment,
+            workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+            payment_labels=PAYMENT_LABELS,
+        )
+
+    @app.post("/payments/<int:payment_id>/delete")
+    @login_required
+    def payment_delete(payment_id):
+        payment = db.get_or_404(Payment, payment_id)
+        attachments = PaymentAttachment.query.filter_by(payment_id=payment.id).all()
+        for attachment in attachments:
+            safe_unlink(Path(app.config["PAYMENT_FOLDER"]) / attachment.stored_name)
+            db.session.delete(attachment)
+        db.session.delete(payment)
+        db.session.commit()
+        audit("payment_deleted", "payment", payment_id)
+        flash("Pagamento eliminato", "success")
+        return redirect(url_for("payments"))
+
+    @app.get("/payments/attachments/<int:attachment_id>")
+    @login_required
+    def payment_attachment_download(attachment_id):
+        attachment = db.get_or_404(PaymentAttachment, attachment_id)
+        audit("payment_attachment_downloaded", "payment_attachment", attachment.id)
+        return send_from_directory(
+            app.config["PAYMENT_FOLDER"],
+            attachment.stored_name,
+            as_attachment=True,
+            download_name=attachment.filename,
+        )
+
+    @app.post("/payments/attachments/<int:attachment_id>/delete")
+    @login_required
+    def payment_attachment_delete(attachment_id):
+        attachment = db.get_or_404(PaymentAttachment, attachment_id)
+        payment_id = attachment.payment_id
+        stored = attachment.stored_name
+        db.session.delete(attachment)
+        db.session.commit()
+        safe_unlink(Path(app.config["PAYMENT_FOLDER"]) / stored)
+        audit("payment_attachment_deleted", "payment_attachment", attachment_id)
+        flash("Allegato eliminato", "success")
+        return redirect(url_for("payment_detail", payment_id=payment_id))
 
     @app.route("/documents", methods=["GET", "POST"])
     @login_required
@@ -1566,7 +2256,13 @@ def create_app(test_config=None):
             parsed_date = date.fromisoformat(report_date)
         except ValueError:
             parsed_date = date.today()
-        return {"mode": mode, "place": place, "date": parsed_date}
+        return {
+            "mode": mode,
+            "place": place,
+            "date": parsed_date,
+            "worker_signature": _signature_path(worker),
+            "employer_signature": _signature_path(employer),
+        }
 
     def _rule_notes(year):
         verified = year in {2025, 2026}
@@ -1574,14 +2270,83 @@ def create_app(test_config=None):
         return [prefix, "Ferie: 26 giorni lavorativi annui; per servizio inferiore all'anno maturano in dodicesimi e la frazione di mese pari o superiore a 15 giorni vale come mese intero (fonte: INPS, Calcolare contributi, tredicesima e ferie per i lavoratori domestici).", "TFR (rapporti dal 1990): quota dell'anno = retribuzione utile / 13,5. La quota dell'anno corrente non è rivalutata (fonte: INPS, Dimissioni, licenziamento e TFR dei lavoratori domestici; art. 2120 c.c.).", "Quote TFR di anni precedenti: rivalutazione legale 1,5% + 75% dell'incremento dell'indice FOI ISTAT dicembre/dicembre.", "Tredicesima: un dodicesimo della retribuzione annua; nel prospetto viene inclusa come quota maturata stimata nella base utile TFR (fonte: INPS).", "CU di cortesia: il PDF è una certificazione del datore privato non sostituto d'imposta e non il modello CU telematico (fonte: Agenzia delle Entrate, istruzioni dichiarazione precompilata)."]
 
     def _fiscal_data(worker, summary, year):
-        if not worker.inps_number or not worker.contract_number:
+        inps = inps_contribution_summary(worker, summary, year) if worker.inps_number else None
+        taxes = estimated_irpef_summary(worker, summary, year) if worker.inps_number and worker.contract_number else None
+        if not inps and not taxes:
             return None
-        return {
-            "inps": inps_contribution_summary(worker, summary, year),
-            "taxes": estimated_irpef_summary(worker, summary, year),
-        }
+        return {"inps": inps, "taxes": taxes}
 
-    def _archive_pdf(worker, report_type, filename, buffer, period_start=None, period_end=None):
+    PAYMENT_LABELS = {
+        "salary": "Retribuzione",
+        "inps_contributions": "Contributi INPS",
+        "thirteenth": "Tredicesima",
+        "tfr": "TFR",
+        "expense_refund": "Rimborso spese",
+        "other": "Altro",
+    }
+
+    def _payments_for_period(worker_id, period_start=None, period_end=None, payment_types=None):
+        rows = Payment.query.filter_by(worker_id=worker_id).order_by(Payment.created_at, Payment.id).all()
+        selected = []
+        for payment in rows:
+            if payment_types and payment.payment_type not in payment_types:
+                continue
+            start = payment.period_start or payment.payment_date
+            end = payment.period_end or payment.payment_date or start
+            if period_start and end and end < period_start:
+                continue
+            if period_end and start and start > period_end:
+                continue
+            selected.append(payment)
+        return selected
+
+    def _ensure_generated_payment(report, worker, payment_type, amount, period_start, period_end, description):
+        amount = Decimal(str(amount or 0)).quantize(Decimal("0.01"))
+        if amount <= 0:
+            return None
+        if payment_type == "inps_contributions" and not worker.inps_number:
+            return None
+        existing = Payment.query.filter_by(
+            worker_id=worker.id,
+            payment_type=payment_type,
+            period_start=period_start,
+            period_end=period_end,
+        ).all()
+        paid = sum((row.amount for row in existing if row.status == "paid"), Decimal("0"))
+        residual = max(Decimal("0"), amount - paid)
+        pending = next((row for row in existing if row.status == "pending" and (row.description or "").startswith("Generato automaticamente")), None)
+        if residual <= 0:
+            if pending:
+                db.session.delete(pending)
+            return None
+        if pending is None:
+            pending = Payment(
+                worker_id=worker.id,
+                employer_id=worker.employer_id,
+                source_report_id=report.id,
+                payment_type=payment_type,
+                amount=residual,
+                status="pending",
+                period_start=period_start,
+                period_end=period_end,
+                description=f"Generato automaticamente: {description}",
+            )
+            db.session.add(pending)
+        else:
+            pending.amount = residual
+            pending.source_report_id = report.id
+            pending.employer_id = worker.employer_id
+        return pending
+
+    def _archive_pdf(
+        worker,
+        report_type,
+        filename,
+        buffer,
+        period_start=None,
+        period_end=None,
+        auto_payments=None,
+    ):
         payload = buffer.getvalue() if hasattr(buffer, "getvalue") else buffer.read()
         report = store_report(
             app,
@@ -1592,13 +2357,75 @@ def create_app(test_config=None):
             period_start=period_start,
             period_end=period_end,
         )
+        for spec in auto_payments or []:
+            _ensure_generated_payment(
+                report,
+                worker,
+                spec["payment_type"],
+                spec.get("amount"),
+                period_start,
+                period_end,
+                spec.get("description") or filename,
+            )
+        if report_type == "monthly_payroll" and worker and period_start and period_end:
+            monthly_expenses = Expense.query.filter(
+                Expense.worker_id == worker.id,
+                Expense.expense_date <= period_end,
+            ).all()
+            for expense in monthly_expenses:
+                allocations = list(expense.recovery_allocations)
+                due_now = [
+                    item
+                    for item in allocations
+                    if period_start <= item.due_month <= period_end
+                ]
+                if not allocations and period_start <= expense.expense_date <= period_end:
+                    manual = sum(
+                        (
+                            Decimal(item.amount)
+                            for item in expense.settlements
+                            if item.settlement_date <= period_end
+                        ),
+                        Decimal("0"),
+                    )
+                    if not (expense.reimbursed and not expense.settlements):
+                        residual = max(Decimal("0"), Decimal(expense.amount) - manual)
+                        if residual > 0:
+                            allocation = ExpenseRecoveryAllocation(
+                                expense_id=expense.id,
+                                due_month=period_start,
+                                amount=residual.quantize(Decimal("0.01")),
+                                locked_at=datetime.now(UTC).replace(tzinfo=None),
+                            )
+                            db.session.add(allocation)
+                            due_now = [allocation]
+                lock_time = datetime.now(UTC).replace(tzinfo=None)
+                for allocation in due_now:
+                    if allocation.locked_at is None:
+                        allocation.locked_at = lock_time
+        db.session.commit()
         audit("report_generated", "generated_report", report.id, report_type)
+        if request.args.get("return_to_list") == "1":
+            return redirect(
+                url_for(
+                    "reports",
+                    worker_id=worker.id if worker else None,
+                    year=request.args.get("year"),
+                    month=request.args.get("month"),
+                    approval=request.args.get("approval"),
+                    signature_place=request.args.get("signature_place"),
+                    report_date=request.args.get("report_date"),
+                    created_report=report.id,
+                    _anchor="archived-reports",
+                )
+            )
         return send_file(
             BytesIO(payload),
             mimetype="application/pdf",
             as_attachment=True,
             download_name=filename,
         )
+
 
     @app.get("/reports")
     @login_required
@@ -1620,6 +2447,11 @@ def create_app(test_config=None):
         selected = db.session.get(Worker, worker_id) if worker_id else None
         selected_employer = _employer_for(selected) if selected else None
         default_place = (selected_employer.city or selected_employer.address or "") if selected_employer else ""
+        period_start = date(year, month, 1) if month in range(1, 13) else None
+        period_end = date(year, month, monthrange(year, month)[1]) if period_start else None
+        period_payments = _payments_for_period(worker_id, period_start, period_end) if worker_id and period_start else []
+        paid_salary = sum((p.amount for p in period_payments if p.status == "paid" and p.payment_type == "salary"), Decimal("0"))
+        residual_salary = max(Decimal("0"), (summary["payable"] if summary else Decimal("0")) - paid_salary)
         return render_template(
             "reports.html",
             workers=workers,
@@ -1633,6 +2465,10 @@ def create_app(test_config=None):
             signature_place=request.args.get("signature_place", default_place),
             report_date=request.args.get("report_date", today.isoformat()),
             archived_reports=GeneratedReport.query.order_by(GeneratedReport.created_at.desc()).limit(100).all(),
+            period_payments=period_payments,
+            paid_salary=paid_salary,
+            residual_salary=residual_salary,
+            created_report=request.args.get("created_report", type=int),
         )
 
     @app.get("/reports/payroll.pdf")
@@ -1648,9 +2484,47 @@ def create_app(test_config=None):
             summary = get_summary(worker_id, year, month)
         except ValueError:
             abort(400)
-        vacation=vacation_balance(worker,absences_list,year,min(date.today(),date(year,12,31)))
-        audit("payroll_downloaded","worker",worker_id,f"{year}-{month:02d}")
-        return _archive_pdf(worker, "monthly_payroll", f"cedolino-{year}-{month:02d}.pdf", payroll_pdf(worker,summary,year,month,_employer_for(worker),vacation,_fiscal_data(worker, summary, year),[x for x in expenses_list if x.expense_date.year == year and x.expense_date.month == month], approval=_report_approval(worker, "both")), date(year, month, 1), date(year, month, monthrange(year, month)[1]))
+        period_start = date(year, month, 1)
+        period_end = date(year, month, monthrange(year, month)[1])
+        vacation = vacation_balance(worker, absences_list, year, min(date.today(), date(year, 12, 31)))
+        fiscal = _fiscal_data(worker, summary, year)
+        period_payments = _payments_for_period(worker.id, period_start, period_end)
+        auto_payments = [{
+            "payment_type": "salary",
+            "amount": summary["payable"],
+            "description": f"Retribuzione {month:02d}/{year}",
+        }]
+        if worker.inps_number and fiscal and fiscal.get("inps") and not fiscal["inps"].get("unavailable"):
+            auto_payments.append({
+                "payment_type": "inps_contributions",
+                "amount": fiscal["inps"].get("total", 0),
+                "description": f"Contributi INPS stimati {month:02d}/{year}",
+            })
+        audit("payroll_downloaded", "worker", worker_id, f"{year}-{month:02d}")
+        return _archive_pdf(
+            worker,
+            "monthly_payroll",
+            f"cedolino-{year}-{month:02d}.pdf",
+            payroll_pdf(
+                worker,
+                summary,
+                year,
+                month,
+                _employer_for(worker),
+                vacation,
+                fiscal,
+                [
+                    x
+                    for x in expenses_list
+                    if _expense_relevant_to_period(x, period_start, period_end)
+                ],
+                approval=_report_approval(worker, "both"),
+                payments=period_payments,
+            ),
+            period_start,
+            period_end,
+            auto_payments=auto_payments,
+        )
 
     @app.get("/reports/annual-payroll.pdf")
     @login_required
@@ -1659,9 +2533,27 @@ def create_app(test_config=None):
         year = request.args.get("year", type=int)
         if worker_id is None or year is None:
             abort(400)
-        worker,annual,vacation=get_annual(worker_id,year)
-        audit("annual_payroll_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "annual_payroll", f"cedolino-annuale-{year}.pdf", annual_payroll_pdf(worker,_employer_for(worker),annual,year,vacation,_fiscal_data(worker, annual, year),Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= date(year,1,1), Expense.expense_date <= date(year,12,31)).order_by(Expense.expense_date).all(), approval=_report_approval(worker, "both")), date(year, 1, 1), date(year, 12, 31))
+        worker, annual, vacation = get_annual(worker_id, year)
+        start, end = date(year, 1, 1), date(year, 12, 31)
+        audit("annual_payroll_downloaded", "worker", worker_id, str(year))
+        return _archive_pdf(
+            worker,
+            "annual_payroll",
+            f"cedolino-annuale-{year}.pdf",
+            annual_payroll_pdf(
+                worker,
+                _employer_for(worker),
+                annual,
+                year,
+                vacation,
+                _fiscal_data(worker, annual, year),
+                Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
+                approval=_report_approval(worker, "both"),
+                payments=_payments_for_period(worker.id, start, end),
+            ),
+            start,
+            end,
+        )
 
     @app.get("/reports/cu-courtesy.pdf")
     @login_required
@@ -1670,9 +2562,25 @@ def create_app(test_config=None):
         year = request.args.get("year", type=int)
         if worker_id is None or year is None:
             abort(400)
-        worker,annual,_=get_annual(worker_id,year)
-        audit("courtesy_cu_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "courtesy_cu", f"cu-cortesia-{year}.pdf", courtesy_cu_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year), approval=_report_approval(worker, "employer")), date(year, 1, 1), date(year, 12, 31))
+        worker, annual, _ = get_annual(worker_id, year)
+        start, end = date(year, 1, 1), date(year, 12, 31)
+        audit("courtesy_cu_downloaded", "worker", worker_id, str(year))
+        return _archive_pdf(
+            worker,
+            "courtesy_cu",
+            f"cu-cortesia-{year}.pdf",
+            courtesy_cu_pdf(
+                worker,
+                _employer_for(worker),
+                annual,
+                year,
+                _fiscal_data(worker, annual, year),
+                approval=_report_approval(worker, "employer"),
+                payments=_payments_for_period(worker.id, start, end),
+            ),
+            start,
+            end,
+        )
 
     @app.get("/reports/tfr.pdf")
     @login_required
@@ -1682,11 +2590,33 @@ def create_app(test_config=None):
         through_year_end = request.args.get("through_year_end") == "1"
         if worker_id is None or year is None:
             abort(400)
-        worker,entries,absences_list,expenses_list,rates_list=_worker_data(worker_id)
-        cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
-        tfr=tfr_year_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff,_tfr_factor())
-        audit("tfr_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "tfr", f"tfr-{year}.pdf", tfr_annual_pdf(worker,_employer_for(worker),tfr,year,_rule_notes(year),_fiscal_data(worker, tfr, year), approval=_report_approval(worker, "both")), date(year, 1, 1), cutoff)
+        worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker_id)
+        cutoff = date(year, 12, 31) if through_year_end or year < date.today().year else date.today()
+        start = date(year, 1, 1)
+        tfr = tfr_year_summary(worker, entries, absences_list, expenses_list, rates_list, year, cutoff, _tfr_factor())
+        audit("tfr_report_downloaded", "worker", worker_id, str(year))
+        return _archive_pdf(
+            worker,
+            "tfr",
+            f"tfr-{year}.pdf",
+            tfr_annual_pdf(
+                worker,
+                _employer_for(worker),
+                tfr,
+                year,
+                _rule_notes(year),
+                _fiscal_data(worker, tfr, year),
+                approval=_report_approval(worker, "both"),
+                payments=_payments_for_period(worker.id, start, cutoff, {"tfr"}),
+            ),
+            start,
+            cutoff,
+            auto_payments=[{
+                "payment_type": "tfr",
+                "amount": tfr["tfr_accrual"],
+                "description": f"TFR {year}",
+            }],
+        )
 
     @app.get("/reports/thirteenth.pdf")
     @login_required
@@ -1696,12 +2626,34 @@ def create_app(test_config=None):
         through_year_end = request.args.get("through_year_end") == "1"
         if worker_id is None or year is None:
             abort(400)
-        worker,entries,absences_list,expenses_list,rates_list=_worker_data(worker_id)
-        cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
-        th=thirteenth_year_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff)
-        annual=annual_summary([e for e in entries if e.work_date <= cutoff],[a for a in absences_list if a.start_date <= cutoff],[x for x in expenses_list if x.expense_date <= cutoff],rates_list,year,_tfr_factor())
-        audit("thirteenth_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "thirteenth", f"tredicesima-{year}.pdf", thirteenth_payroll_pdf(worker,_employer_for(worker),th,year,_rule_notes(year),_fiscal_data(worker, annual, year), approval=_report_approval(worker, "both")), date(year, 1, 1), cutoff)
+        worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker_id)
+        cutoff = date(year, 12, 31) if through_year_end or year < date.today().year else date.today()
+        start = date(year, 1, 1)
+        th = thirteenth_year_summary(worker, entries, absences_list, expenses_list, rates_list, year, cutoff)
+        annual = annual_summary([e for e in entries if e.work_date <= cutoff], [a for a in absences_list if a.start_date <= cutoff], [x for x in expenses_list if x.expense_date <= cutoff], rates_list, year, _tfr_factor())
+        audit("thirteenth_report_downloaded", "worker", worker_id, str(year))
+        return _archive_pdf(
+            worker,
+            "thirteenth",
+            f"tredicesima-{year}.pdf",
+            thirteenth_payroll_pdf(
+                worker,
+                _employer_for(worker),
+                th,
+                year,
+                _rule_notes(year),
+                _fiscal_data(worker, annual, year),
+                approval=_report_approval(worker, "both"),
+                payments=_payments_for_period(worker.id, start, cutoff, {"thirteenth"}),
+            ),
+            start,
+            cutoff,
+            auto_payments=[{
+                "payment_type": "thirteenth",
+                "amount": th["thirteenth"],
+                "description": f"Tredicesima {year}",
+            }],
+        )
 
     @app.get("/reports/thirteenth-tfr.pdf")
     @login_required
@@ -1711,11 +2663,31 @@ def create_app(test_config=None):
         through_year_end = request.args.get("through_year_end") == "1"
         if worker_id is None or year is None:
             abort(400)
-        worker,entries,absences_list,expenses_list,rates_list=_worker_data(worker_id)
-        cutoff=date(year,12,31) if through_year_end or year < date.today().year else date.today()
-        combined=combined_thirteenth_tfr_summary(worker,entries,absences_list,expenses_list,rates_list,year,cutoff,_tfr_factor())
-        audit("thirteenth_tfr_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "thirteenth_tfr", f"tredicesima-tfr-{year}.pdf", combined_thirteenth_tfr_pdf(worker,_employer_for(worker),combined,year,_rule_notes(year), approval=_report_approval(worker, "both")), date(year, 1, 1), cutoff)
+        worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker_id)
+        cutoff = date(year, 12, 31) if through_year_end or year < date.today().year else date.today()
+        start = date(year, 1, 1)
+        combined = combined_thirteenth_tfr_summary(worker, entries, absences_list, expenses_list, rates_list, year, cutoff, _tfr_factor())
+        audit("thirteenth_tfr_report_downloaded", "worker", worker_id, str(year))
+        return _archive_pdf(
+            worker,
+            "thirteenth_tfr",
+            f"tredicesima-tfr-{year}.pdf",
+            combined_thirteenth_tfr_pdf(
+                worker,
+                _employer_for(worker),
+                combined,
+                year,
+                _rule_notes(year),
+                approval=_report_approval(worker, "both"),
+                payments=_payments_for_period(worker.id, start, cutoff, {"thirteenth", "tfr"}),
+            ),
+            start,
+            cutoff,
+            auto_payments=[
+                {"payment_type": "thirteenth", "amount": combined["thirteenth"]["thirteenth"], "description": f"Tredicesima {year}"},
+                {"payment_type": "tfr", "amount": combined["tfr"]["tfr_accrual"], "description": f"TFR {year}"},
+            ],
+        )
 
     @app.get("/reports/trend.pdf")
     @login_required
@@ -1724,9 +2696,26 @@ def create_app(test_config=None):
         year = request.args.get("year", type=int)
         if worker_id is None or year is None:
             abort(400)
-        worker,annual,_=get_annual(worker_id,year)
-        audit("trend_report_downloaded","worker",worker_id,str(year))
-        return _archive_pdf(worker, "trend", f"andamento-{year}.pdf", trend_pdf(worker,_employer_for(worker),annual,year,_fiscal_data(worker, annual, year),Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= date(year,1,1), Expense.expense_date <= date(year,12,31)).order_by(Expense.expense_date).all(), approval=_report_approval(worker, "none")), date(year, 1, 1), date(year, 12, 31))
+        worker, annual, _ = get_annual(worker_id, year)
+        start, end = date(year, 1, 1), date(year, 12, 31)
+        audit("trend_report_downloaded", "worker", worker_id, str(year))
+        return _archive_pdf(
+            worker,
+            "trend",
+            f"andamento-{year}.pdf",
+            trend_pdf(
+                worker,
+                _employer_for(worker),
+                annual,
+                year,
+                _fiscal_data(worker, annual, year),
+                Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
+                approval=_report_approval(worker, "none"),
+                payments=_payments_for_period(worker.id, start, end),
+            ),
+            start,
+            end,
+        )
 
     @app.get("/reports/location-trend.pdf")
     @login_required
@@ -1760,7 +2749,14 @@ def create_app(test_config=None):
             worker,
             "location_trend",
             f"andamento-ore-luogo-{year}.pdf",
-            location_trend_pdf(worker, _employer_for(worker), location_data, year, approval=_report_approval(worker, "none")),
+            location_trend_pdf(
+                worker,
+                _employer_for(worker),
+                location_data,
+                year,
+                approval=_report_approval(worker, "none"),
+                payments=_payments_for_period(worker.id, date(year, 1, 1), date(year, 12, 31)),
+            ),
             date(year, 1, 1),
             date(year, 12, 31),
         )
@@ -1777,11 +2773,25 @@ def create_app(test_config=None):
             download_name=report.filename,
         )
 
+    @app.get("/reports/archive/<int:report_id>/view")
+    @login_required
+    def view_archived_report(report_id):
+        report = db.get_or_404(GeneratedReport, report_id)
+        audit("report_viewed", "generated_report", report.id)
+        return send_from_directory(
+            app.config["REPORT_FOLDER"],
+            report.stored_name,
+            as_attachment=False,
+            download_name=report.filename,
+            mimetype=report.mime_type,
+        )
+
     @app.post("/reports/archive/<int:report_id>/delete")
     @login_required
     def delete_archived_report(report_id):
         report = db.get_or_404(GeneratedReport, report_id)
         stored_name = report.stored_name
+        Payment.query.filter_by(source_report_id=report.id).update({"source_report_id": None}, synchronize_session=False)
         db.session.delete(report)
         db.session.commit()
         safe_unlink(Path(app.config["REPORT_FOLDER"]) / stored_name)

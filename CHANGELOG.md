@@ -162,3 +162,45 @@
 - Dettaglio delle spese nei report del periodo di competenza.
 - Migliorata la presentazione professionale delle azioni su luoghi, datori, documenti e report.
 - Aggiunte immagini fotografiche contestuali alle diverse aree dell'interfaccia e ridisegnata la testata utente.
+
+## r55-full
+- Report PDF con logo applicativo, versione/build e autore su ogni pagina.
+- Firme grafiche opzionali per lavoratore e datore, caricate dalle anagrafiche (PNG/JPEG/TIFF/WEBP/BMP) e apposte ai report quando richieste.
+- Archivio report con visualizzazione inline e ritorno automatico alla lista dopo la generazione.
+- Registro pagamenti completo: retribuzione, contributi INPS, tredicesima, TFR, rimborsi e altre liquidazioni; stato, data, periodo, note e allegati.
+- Generazione report mensile con voce automatica residua “da pagare” e contributi INPS stimati quando è presente la posizione INPS.
+- Report con evidenza di quote già liquidate e residui.
+- Full export/import esteso a firme, pagamenti e relativi allegati.
+
+## r56-full - 2026-09-15
+- Aggiunte compensazioni manuali multiple e parziali per ogni spesa/anticipo, in entrambe le direzioni datore↔lavoratore.
+- Supportate compensazioni in contanti, bonifico, carta, altro metodo elettronico o altro metodo, con note e documento facoltativo.
+- Il documento non è obbligatorio: una compensazione in contanti può essere tracciata come solo record auditabile.
+- Il cedolino considera esclusivamente il saldo residuo della spesa dopo le compensazioni manuali registrate entro la fine del mese di competenza.
+- Bloccata la sovracompensazione e impedita la riduzione dell'importo originario sotto le compensazioni già registrate.
+- Aggiunti dettaglio della partita, storico compensazioni, modifica/eliminazione, download allegati e audit dedicato.
+- Compatibilità preservata per i vecchi record `reimbursed`: continuano a risultare integralmente regolati.
+- Nuova migrazione Alembic `1007_expense_settlements`.
+- Report PDF aggiornati con importo originario, compensato e residuo, oltre al dettaglio delle compensazioni manuali.
+
+## r59 - Ruff formatter cleanup
+
+- Normalized migrations 1006 and 1007 to the `ruff format` style used by the production gate (`line-length = 100`).
+- No functional or database-schema changes relative to r58.
+- Updated package/build labels and verification scripts to r59-full.
+
+## r58 - production gate formatting cleanup
+
+- Reformatted Alembic migrations 1006, 1007 and 1008 to match Black output.
+- No functional changes to the r57 expense settlement, carry-forward or installment logic.
+- Updated package/build labels and verification scripts to r58-full.
+
+## r57 - carry-forward and installment recovery
+
+- Added carry-forward of expense/reimbursement residuals to a later month.
+- Added installment plans by installment count or fixed installment amount, with final remainder handling.
+- Later manual settlements reduce future still-open quotas while preserving earlier consolidated payroll quotas.
+- Monthly payroll generation locks the quota actually included in that payroll to prevent duplicate reimbursement.
+- Added `1008_expense_recovery_allocations` migration and full-export support for recovery plans and settlement evidence.
+- Fixed missing `Decimal` import in `reporting.py` that caused Ruff F821 errors and payroll PDF test failure.
+- Formatter-cleaned expense settlement migrations.

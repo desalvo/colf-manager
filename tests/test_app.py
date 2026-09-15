@@ -12,6 +12,8 @@ from colf_manager.models import (
     Document,
     Employer,
     Expense,
+    ExpenseRecoveryAllocation,
+    ExpenseSettlement,
     GeneratedReport,
     HourlyRate,
     Location,
@@ -824,3 +826,164 @@ def test_password_can_be_changed_from_settings(app, client):
     with app.app_context():
         user = User.query.filter_by(username="admin").one()
         assert user.must_change_password is False
+
+
+def test_expense_partial_manual_settlements_reduce_payroll_residual(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    assert client.post(
+        "/expenses",
+        data={
+            "worker_id": worker_id,
+            "expense_date": "2026-09-02",
+            "description": "Spesa anticipata",
+            "amount": "120.00",
+            "direction": "worker_advance",
+        },
+    ).status_code == 302
+    with app.app_context():
+        expense = Expense.query.one()
+        expense_id = expense.id
+    for day, amount, method in [(3, "40.00", "cash"), (12, "30.00", "bank_transfer")]:
+        assert client.post(
+            f"/expenses/{expense_id}/settlements",
+            data={
+                "settlement_date": f"2026-09-{day:02d}",
+                "amount": amount,
+                "method": method,
+                "notes": "compensazione parziale",
+            },
+        ).status_code == 302
+    with app.app_context():
+        expense = db.session.get(Expense, expense_id)
+        assert len(expense.settlements) == 2
+        summary = monthly_summary([], [], [expense], [], 2026, 9)
+        assert summary["worker_advances"] == Decimal("50.00")
+        assert summary["reimbursements"] == Decimal("50.00")
+        assert ExpenseSettlement.query.count() == 2
+
+
+def test_expense_settlement_rejects_overpayment_without_carry_plan(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    client.post(
+        "/expenses",
+        data={
+            "worker_id": worker_id,
+            "expense_date": "2026-09-20",
+            "description": "Acquisto",
+            "amount": "20.00",
+            "direction": "employer_advance",
+        },
+    )
+    with app.app_context():
+        expense_id = Expense.query.one().id
+    client.post(
+        f"/expenses/{expense_id}/settlements",
+        data={"settlement_date": "2026-09-21", "amount": "15.00", "method": "cash"},
+    )
+    client.post(
+        f"/expenses/{expense_id}/settlements",
+        data={"settlement_date": "2026-09-22", "amount": "10.00", "method": "cash"},
+    )
+    client.post(
+        f"/expenses/{expense_id}/settlements",
+        data={"settlement_date": "2026-10-01", "amount": "5.00", "method": "cash"},
+    )
+    with app.app_context():
+        assert ExpenseSettlement.query.count() == 1
+        expense = db.session.get(Expense, expense_id)
+        summary = monthly_summary([], [], [expense], [], 2026, 9)
+        assert summary["employer_advances"] == Decimal("5.00")
+
+
+def test_expense_carry_forward_moves_residual_to_next_month(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    client.post(
+        "/expenses",
+        data={
+            "worker_id": worker_id,
+            "expense_date": "2026-09-10",
+            "description": "Spesa riportata",
+            "amount": "90.00",
+            "direction": "worker_advance",
+        },
+    )
+    with app.app_context():
+        expense_id = Expense.query.one().id
+    response = client.post(
+        f"/expenses/{expense_id}/recovery-plan",
+        data={"mode": "carry_forward", "start_month": "2026-10"},
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        expense = db.session.get(Expense, expense_id)
+        assert ExpenseRecoveryAllocation.query.count() == 1
+        assert monthly_summary([], [], [expense], [], 2026, 9)["worker_advances"] == Decimal("0.00")
+        assert monthly_summary([], [], [expense], [], 2026, 10)["worker_advances"] == Decimal("90.00")
+
+
+def test_expense_installments_and_later_manual_settlement_reduce_future_quota(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    client.post(
+        "/expenses",
+        data={
+            "worker_id": worker_id,
+            "expense_date": "2026-09-10",
+            "description": "Spesa rateizzata",
+            "amount": "180.00",
+            "direction": "worker_advance",
+        },
+    )
+    with app.app_context():
+        expense_id = Expense.query.one().id
+    client.post(
+        f"/expenses/{expense_id}/recovery-plan",
+        data={
+            "mode": "installments",
+            "start_month": "2026-10",
+            "installment_count": "3",
+        },
+    )
+    client.post(
+        f"/expenses/{expense_id}/settlements",
+        data={"settlement_date": "2026-11-05", "amount": "30.00", "method": "cash"},
+    )
+    with app.app_context():
+        expense = db.session.get(Expense, expense_id)
+        assert [Decimal(x.amount) for x in expense.recovery_allocations] == [
+            Decimal("60.00"), Decimal("60.00"), Decimal("60.00")
+        ]
+        assert monthly_summary([], [], [expense], [], 2026, 10)["worker_advances"] == Decimal("60.00")
+        assert monthly_summary([], [], [expense], [], 2026, 11)["worker_advances"] == Decimal("60.00")
+        assert monthly_summary([], [], [expense], [], 2026, 12)["worker_advances"] == Decimal("30.00")
+
+
+def test_expense_installments_by_amount_create_final_remainder(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    client.post(
+        "/expenses",
+        data={
+            "worker_id": worker_id,
+            "expense_date": "2026-09-10",
+            "description": "Rate importo fisso",
+            "amount": "125.00",
+            "direction": "employer_advance",
+        },
+    )
+    with app.app_context():
+        expense_id = Expense.query.one().id
+    client.post(
+        f"/expenses/{expense_id}/recovery-plan",
+        data={
+            "mode": "installments",
+            "start_month": "2026-10",
+            "installment_amount": "50.00",
+        },
+    )
+    with app.app_context():
+        amounts = [Decimal(x.amount) for x in ExpenseRecoveryAllocation.query.order_by(ExpenseRecoveryAllocation.due_month)]
+        assert amounts == [Decimal("50.00"), Decimal("50.00"), Decimal("25.00")]

@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r54-full
+# colf-manager 1.0.0 · build r59-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -82,3 +82,13 @@ The mobile/tablet UI uses a dedicated off-canvas navigation shell: the sidebar i
 ## Calendar subscriptions
 
 From **Settings**, administrators can configure the external application URL and enable tokenized read-only subscriptions for a worker or employer. Each enabled calendar exposes an ICS feed and a CalDAV collection URL. Employer subscriptions aggregate events for associated workers. Tokens can be regenerated or revoked at any time.
+
+### r55 - reports, signatures and payments
+- PDF reports now show the application logo, version/build and author on every page, with refreshed professional styling and inline archive viewing.
+- Optional worker/employer graphic signatures can be uploaded from their records (PNG, JPEG, TIFF, WEBP, BMP) and automatically embedded when signatures are requested.
+- A Payments register supports manual entries and automatic residual tracking from generated reports: salary, INPS contributions, thirteenth-month salary, TFR, reimbursements and other payments, with status, date, period, notes and attachments.
+- INPS contribution payments are available only when the worker has a recorded INPS position.
+- Full export/import includes signatures, payments and payment attachments in addition to database, documents and reports.
+
+### Manual expense/reimbursement settlements
+Each expense creates a balance owed either to the employer or to the worker. Multiple partial settlements can be recorded, including cash with no attachment, or bank/card/other methods with optional evidence. The system tracks original amount, manually settled amount and remaining balance, and prevents over-settlement. The remaining balance can stay in the payroll for the expense month, be carried forward in full to a later month, or be split into installments by installment count or amount. Manual settlements remain possible in later months when a carry-forward/installment plan exists and reduce future open quotas. Quotas already included in generated payroll are locked to prevent duplicate reimbursement. For example, a EUR 120 expense settled by EUR 40 and then EUR 30 leaves EUR 50 for payroll.

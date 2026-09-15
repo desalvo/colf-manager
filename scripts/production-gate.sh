@@ -2,16 +2,29 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager full package r67: production gate =="
+echo "== colf-manager full package r68: production gate =="
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" && -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: activate .venv first for local execution." >&2
   exit 2
 fi
 
-version="$(cat VERSION)"
-test "$version" = "$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
-test "$version" = "$(python -c 'import colf_manager; print(colf_manager.__version__)')"
+build_revision="$(cat VERSION)"
+project_version="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+package_version="$(python -c 'import colf_manager; print(colf_manager.__version__)')"
+package_build="$(python -c 'import colf_manager; print(colf_manager.__build__)')"
+
+if [[ "$project_version" != "$package_version" ]]; then
+  echo "ERROR: project version mismatch: pyproject=$project_version package=$package_version" >&2
+  exit 1
+fi
+
+if [[ "$build_revision" != "$package_build" ]]; then
+  echo "ERROR: build revision mismatch: VERSION=$build_revision package=$package_build" >&2
+  exit 1
+fi
+
+echo "Version check: app=$project_version build=$build_revision"
 
 ruff check .
 ruff format --check .
@@ -103,7 +116,7 @@ if any(count < 2 for count in pages.values()):
 
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r67-full",
+    "overlay_revision": "r68-full",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -131,4 +144,4 @@ Path("dist/production-evidence.json").write_text(
 )
 PY
 
-echo "Production gate r67 full passed."
+echo "Production gate r68 full passed."

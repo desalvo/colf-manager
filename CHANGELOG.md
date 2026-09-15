@@ -1,4 +1,4 @@
-# r67-full
+# r68-full
 
 - Ripristinata nell’overview la dicitura richiesta `TFR annuo maturato finora`.
 - Stabilizzati rispetto a `ruff format --check` i moduli normativi/migrazione già validati, tramite direttiva standard `# fmt: off`, senza modifiche funzionali.
@@ -259,3 +259,7 @@
 - Added permit hours, paid by default with optional unpaid state.
 - Vacation remains a day-based entitlement and is exposed only in days.
 - Added migration 1009 and updated calendar, summaries, payroll reports and tests.
+
+## r68-full
+- Fixed production gate version/build validation: application version is checked against __version__, build revision against __build__.
+- Added explicit diagnostics for future version/build mismatches.

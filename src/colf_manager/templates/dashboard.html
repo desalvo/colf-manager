@@ -55,13 +55,35 @@
 <details class="card collapsible-card">
   <summary><span><b>Permessi retribuiti e non retribuiti</b><small>Utilizzo, eventuale miglior favore e monte disponibile per categoria</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
   <div class="collapsible-content">
-    <div class="table-scroll"><table class="indicator-table"><thead><tr><th>🏷️ Categoria</th><th>✅ Retr. mese</th><th>📅 Retr. anno</th><th>🤝 Miglior favore</th><th>○ Non retr. mese</th><th>🚫 Non retr. anno</th><th>📈 Maturato</th><th>🎯 Totale anno</th><th>🟢 Residuo</th></tr></thead><tbody>
+    <div class="permit-category-list">
     {% for code,p in stats.permit_categories.items() %}
-      {% set usage_class='' %}{% if not p.non_numeric_entitlement and p.annual_total > 0 %}{% set ratio=(p.annual_total-p.remaining)/p.annual_total %}{% if ratio >= 0.9 %}{% set usage_class='indicator-danger' %}{% elif ratio >= 0.7 %}{% set usage_class='indicator-warning' %}{% else %}{% set usage_class='indicator-safe' %}{% endif %}{% endif %}
-      <tr><td><b>🕒 {{p.label}}</b><br><small>{{p.basis}}</small></td><td>✅ {{'%.2f'|format(p.paid_month)}} h</td><td>📅 {{'%.2f'|format(p.paid_year)}} h</td><td>🤝 {{'%.2f'|format(p.extra_paid_year or 0)}} h</td><td>○ {{'%.2f'|format(p.unpaid_month)}} h</td><td>🚫 {{'%.2f'|format(p.unpaid_year)}} h</td><td>{% if p.non_numeric_entitlement %}ℹ️ Per evento / requisiti{% else %}📈 {{'%.2f'|format(p.accrued_to_date)}} h{% endif %}</td><td>{% if p.non_numeric_entitlement %}ℹ️ Non definito come plafond annuo{% else %}🎯 {{'%.2f'|format(p.annual_total)}} h{% endif %}</td><td class="{{usage_class}}">{% if p.non_numeric_entitlement %}—{% else %}🟢 {{'%.2f'|format(p.remaining)}} h{% endif %}</td></tr>
+      {% set usage_class='' %}
+      {% if not p['non_numeric_entitlement'] and p['annual_total']|float > 0 %}
+        {% set ratio=(p['annual_total']|float-p['remaining']|float)/(p['annual_total']|float) %}
+        {% if ratio >= 0.9 %}{% set usage_class='metric-danger' %}{% elif ratio >= 0.7 %}{% set usage_class='metric-warning' %}{% else %}{% set usage_class='metric-safe' %}{% endif %}
+      {% endif %}
+      <section class="permit-category-card {{usage_class}}" data-permit-category="{{code}}">
+        <header><span class="permit-category-icon" aria-hidden="true">🕒</span><span><b>{{p['label']}}</b><small>{{p['basis']}}</small></span></header>
+        <div class="permit-metrics-grid">
+          <article><span>✅ Retribuiti mese</span><strong data-metric="permit-{{code}}-paid-month">{{'%.2f'|format(p['paid_month'])}} h</strong></article>
+          <article><span>📅 Retribuiti anno</span><strong data-metric="permit-{{code}}-paid-year">{{'%.2f'|format(p['paid_year'])}} h</strong></article>
+          <article><span>○ Non retribuiti mese</span><strong data-metric="permit-{{code}}-unpaid-month">{{'%.2f'|format(p['unpaid_month'])}} h</strong></article>
+          <article><span>🚫 Non retribuiti anno</span><strong data-metric="permit-{{code}}-unpaid-year">{{'%.2f'|format(p['unpaid_year'])}} h</strong></article>
+          <article><span>🤝 Miglior favore anno</span><strong data-metric="permit-{{code}}-extra-paid-year">{{'%.2f'|format(p['extra_paid_year'] or 0)}} h</strong></article>
+          {% if p['non_numeric_entitlement'] %}
+            <article><span>📈 Diritto</span><strong data-metric="permit-{{code}}-accrued">Per evento / requisiti</strong></article>
+            <article><span>🎯 Totale anno</span><strong data-metric="permit-{{code}}-annual-total">Nessun plafond annuo</strong></article>
+            <article><span>🟢 Residuo annuale</span><strong data-metric="permit-{{code}}-remaining">N/D</strong></article>
+          {% else %}
+            <article><span>📈 Maturato finora</span><strong data-metric="permit-{{code}}-accrued">{{'%.2f'|format(p['accrued_to_date'])}} h</strong></article>
+            <article><span>🎯 Totale anno</span><strong data-metric="permit-{{code}}-annual-total">{{'%.2f'|format(p['annual_total'])}} h</strong></article>
+            <article class="permit-remaining"><span>🟢 Residuo annuale</span><strong data-metric="permit-{{code}}-remaining">{{'%.2f'|format(p['remaining'])}} h</strong></article>
+          {% endif %}
+        </div>
+      </section>
     {% endfor %}
-    </tbody></table></div>
-    <p class="fineprint">Il trattamento di miglior favore del datore consente di retribuire permessi oltre il plafond contrattuale senza aumentare né falsare il diritto legale residuo: l'eccedenza resta evidenziata separatamente.</p>
+    </div>
+    <p class="fineprint">Per le categorie che condividono il monte ore dell'art. 19, il residuo mostrato è il residuo del monte comune dopo l'utilizzo complessivo di tutte le categorie appartenenti allo stesso gruppo. Il trattamento di miglior favore resta separato e non aumenta il diritto contrattuale residuo.</p>
   </div>
 </details>
 

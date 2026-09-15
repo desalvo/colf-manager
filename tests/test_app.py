@@ -2,6 +2,7 @@
 from datetime import date, time
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
@@ -441,6 +442,49 @@ def test_dashboard_selected_period(app, client):
     assert b"User Example" in response.data
 
 
+def test_dashboard_permit_indicators_show_used_and_remaining(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = Decimal("40")
+        db.session.add(
+            Absence(
+                worker_id=worker_id,
+                kind="permit",
+                permit_category="medical",
+                start_date=date(2026, 9, 10),
+                end_date=date(2026, 9, 10),
+                start_time=time(9),
+                end_time=time(11),
+                paid=True,
+                paid_hours=Decimal("2"),
+            )
+        )
+        db.session.add(
+            Absence(
+                worker_id=worker_id,
+                kind="permit",
+                permit_category="other",
+                start_date=date(2026, 9, 11),
+                end_date=date(2026, 9, 11),
+                start_time=time(12),
+                end_time=time(13),
+                paid=False,
+                paid_hours=Decimal("0"),
+            )
+        )
+        db.session.commit()
+    login(client)
+    response = client.get("/?year=2026&month=9")
+    assert response.status_code == 200
+    assert b'data-metric="permit-medical-paid-year">2.00 h' in response.data
+    assert b'data-metric="permit-medical-accrued">12.00 h' in response.data
+    assert b'data-metric="permit-medical-annual-total">12.00 h' in response.data
+    assert b'data-metric="permit-medical-remaining">10.00 h' in response.data
+    assert b'data-metric="permit-other-unpaid-year">1.00 h' in response.data
+    assert b'data-metric="permit-other-remaining">N/D' in response.data
+
+
 def test_document_manual_delete(app, client):
     worker_id = make_worker(app)
     login(client)
@@ -629,6 +673,28 @@ def test_settings_and_mail_notification(app, client, monkeypatch):
     ).status_code == 302
     assert sent["settings"]["security"] == "ssl"
     assert sent["to"] == "recipient@example.invalid"
+
+
+def test_calendar_dialog_has_one_paid_choice_and_type_specific_sections(app, client):
+    login(client)
+    response = client.get("/calendar")
+    assert response.status_code == 200
+    html = response.data.decode("utf-8")
+    dialog = html.split('<dialog id="workDialog"', 1)[1].split('</dialog>', 1)[0]
+    assert dialog.count('id="paidEntry"') == 1
+    assert 'id="paidWork"' not in dialog
+    assert 'id="paidAbsence"' not in dialog
+    assert 'id="workOnlyFields"' in dialog
+    assert 'id="permitOnlyFields"' in dialog
+    assert 'id="sicknessOnlyFields"' in dialog
+    assert 'id="vacationOnlyFields"' in dialog
+
+    javascript = (Path(__file__).parents[1] / "src/colf_manager/static/calendar.js").read_text()
+    assert "paidEntry.checked = props.paid !== false" in javascript
+    assert "paidEntry.checked = Boolean(props.paid)" in javascript
+    assert "paidEntry.checked = Boolean(data.paid)" in javascript
+    sync_body = javascript.split("function syncEntryKind() {", 1)[1].split("function resetWorkForm()", 1)[0]
+    assert "paidEntry.checked = true" not in sync_body
 
 
 def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):

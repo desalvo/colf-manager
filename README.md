@@ -1,8 +1,12 @@
-# colf-manager 1.0.0 · build r69-full
+# colf-manager 1.0.0 · build r71-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
 Web application for a private employer to record a domestic worker's hours, workplaces, effective-dated rates, vacation, sickness/permit hours, employer/worker advances, expenses, TFR accrual, documents and management reports.
+
+### Calendar editor r71
+
+The calendar entry dialog uses one paid/unpaid control and displays only the fields relevant to the selected type (ordinary/overtime, permit, sickness or vacation). Existing values are preserved when an event is opened for editing.
 
 ## Quick start
 

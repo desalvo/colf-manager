@@ -51,17 +51,25 @@
     <label>Tipo<select name="entry_kind" id="entryKind" required><option value="ordinary">Ore ordinarie</option><option value="overtime">Ore straordinarie</option><option value="sickness">Malattia (giorni)</option><option value="permit">Ore permesso</option><option value="vacation">Ferie (giorni)</option></select></label>
     <label>Lavoratore<select name="worker_id" required>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
     <div class="formgrid date-fields"><label>Data iniziale<input type="date" name="work_date" required></label><label id="endDateField" class="hidden">Data finale inclusa<input type="date" name="end_date"></label></div>
+    <label class="check" id="paidEntryField"><input type="checkbox" name="paid_entry" id="paidEntry" checked> Retribuita</label>
     <div class="formgrid" id="timeFields"><label>Inizio<input type="time" name="start_time" required value="09:00"></label><label>Fine<input type="time" name="end_time" required value="13:00"></label></div>
     <div id="workOnlyFields">
       <label>Luogo<select name="location_id"><option value="">Seleziona un luogo</option>{% for location in locations %}<option value="{{location.id}}">{{location.name}}{% if location.address %} — {{location.address}}{% endif %}</option>{% endfor %}</select></label>
       <label>Pausa (minuti)<input type="number" min="0" name="break_minutes" value="0"></label>
-      <label class="check"><input type="checkbox" name="paid_work" id="paidWork" checked> Retribuite</label>
       <label id="overtimeRateField" class="hidden">Tariffa straordinaria (€ / ora) <small>Vuoto = tariffa oraria vigente.</small><input type="number" min="0" step=".01" name="rate_override"></label>
     </div>
-    <div id="absenceOnlyFields" class="hidden">
-      <label id="permitCategoryField" class="hidden">Categoria permesso<select name="permit_category" id="permitCategory">{% for code,label in permit_categories.items() %}<option value="{{code}}">{{label}}</option>{% endfor %}</select><small>Le categorie retribuite sono validate rispetto al monte previsto dal CCNL vigente per la data.</small></label>
-      <label class="check"><input type="checkbox" name="paid" id="paidAbsence"> Retribuita</label>
-      <label id="absenceHoursField">Ore della registrazione <small>Vuoto = calcolo automatico dall'intervallo inserito.</small><input type="number" min="0" step=".01" name="paid_hours"></label><p id="vacationDaysNote" class="fineprint hidden">Le ferie sono sempre contabilizzate ed esposte in giorni; gli orari non si applicano.</p><p id="sicknessDaysNote" class="fineprint hidden">La malattia è sempre contabilizzata in giorni di calendario. La retribuzione contrattuale è calcolata automaticamente in base all'anzianità e alla regola vigente per la data.</p><label id="oncologicalField" class="check hidden"><input type="checkbox" name="oncological"> Malattia oncologica documentata</label><label id="legalOverrideField" class="check hidden"><input type="checkbox" name="paid_beyond_legal_limit"> Trattamento di miglior favore: retribuisci anche oltre il limite contrattuale</label>
+    <div id="permitOnlyFields" class="hidden">
+      <label>Categoria permesso<select name="permit_category" id="permitCategory">{% for code,label in permit_categories.items() %}<option value="{{code}}">{{label}}</option>{% endfor %}</select><small>Le categorie retribuite sono validate rispetto al monte previsto dal CCNL vigente per la data.</small></label>
+      <label>Ore della registrazione <small>Vuoto = calcolo automatico dall'intervallo inserito.</small><input type="number" min="0" step=".01" name="paid_hours"></label>
+      <label class="check"><input type="checkbox" name="paid_beyond_legal_limit"> Trattamento di miglior favore: retribuisci anche oltre il limite contrattuale</label>
+    </div>
+    <div id="sicknessOnlyFields" class="hidden">
+      <p class="fineprint">La malattia è sempre contabilizzata in giorni di calendario. La retribuzione contrattuale è calcolata automaticamente in base all'anzianità e alla regola vigente per la data.</p>
+      <label class="check"><input type="checkbox" name="oncological"> Malattia oncologica documentata</label>
+      <label class="check"><input type="checkbox" name="sickness_paid_beyond_legal_limit"> Trattamento di miglior favore: retribuisci anche oltre il limite contrattuale</label>
+    </div>
+    <div id="vacationOnlyFields" class="hidden">
+      <p class="fineprint">Le ferie sono sempre contabilizzate ed esposte in giorni; gli orari non si applicano.</p>
     </div>
     <label>Note<textarea name="notes" rows="3"></textarea></label>
     <div class="dialog-actions"><button id="saveWorkButton">Salva</button><button type="button" id="deleteWorkButton" class="danger hidden" title="Elimina registrazione">🗑</button></div>

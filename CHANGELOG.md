@@ -1,5 +1,20 @@
 # Changelog
 
+
+## r71-full - calendar type-specific editor
+
+- The calendar editor now exposes a single shared **Retribuita** choice for all event types.
+- Ordinary/overtime, permit, sickness and vacation fields are isolated into mutually exclusive detail panels.
+- New records default to paid; editing preserves the stored paid state and all type-specific values.
+- Regression coverage verifies a single paid control and prevents `syncEntryKind()` from overwriting persisted paid state.
+
+## r70-full - visible permit indicators
+
+- Reworked the dashboard permit section into responsive per-category indicator cards so used, accrued, annual total and remaining values are always visible without horizontal scrolling.
+- Added explicit paid/unpaid monthly and yearly values plus employer-favour amounts for every permit category.
+- Kept shared Art. 19 pool residuals explicit and documented as common-pool balances.
+- Added stable `data-metric` hooks and a regression test covering paid use, unpaid use, annual entitlement and remaining balance.
+
 ## r69-full - legacy schema bootstrap repair
 
 - Fixed the startup compatibility shim so missing `work_entry.entry_kind`, `paid`, and `rate_override` columns are actually created and committed on existing databases.
@@ -265,6 +280,6 @@
 - Vacation remains a day-based entitlement and is exposed only in days.
 - Added migration 1009 and updated calendar, summaries, payroll reports and tests.
 
-## r69-full
+## r68-full
 - Fixed production gate version/build validation: application version is checked against __version__, build revision against __build__.
 - Added explicit diagnostics for future version/build mismatches.

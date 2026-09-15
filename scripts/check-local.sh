@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager hardening full package r43: local checks =="
+echo "== colf-manager hardening full package r44: local checks =="
 
 required=(
   VERSION
@@ -16,7 +16,7 @@ required=(
 for path in "${required[@]}"; do
   if [[ ! -e "$path" ]]; then
     echo "ERROR: missing $path" >&2
-    echo "Extract full package r43 over a fresh/full clone of desalvo/colf-manager." >&2
+    echo "Extract full package r44 over a fresh/full clone of desalvo/colf-manager." >&2
     exit 2
   fi
 done
@@ -48,4 +48,4 @@ COLF_MANAGER_PRODUCTION=0 COLF_MANAGER_DATA="$(mktemp -d)" \
   flask --app colf_manager.app:create_app db heads
 
 echo
-echo "Full package r43 local checks passed."
+echo "Full package r44 local checks passed."

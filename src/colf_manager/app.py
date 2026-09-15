@@ -45,6 +45,8 @@ from .calculations import (
     estimated_irpef_summary,
     vacation_balance,
     vacation_working_days,
+    sickness_hours_for_period,
+    sickness_year_entitlement,
 )
 from . import __author__, __build__, __version__
 from .backup import create_full_export, restore_full_export
@@ -509,6 +511,10 @@ def create_app(test_config=None):
             "tfr_ytd": 0,
             "vacation_used_month": 0,
             "vacation_remaining_year": 0,
+            "sickness_paid_month": 0,
+            "sickness_unpaid_month": 0,
+            "sickness_paid_remaining_year": 0,
+            "sickness_rule_known": True,
         }
         for worker in workers:
             worker_obj, entries, absences_list, expenses_list, rates_list = _worker_data(worker.id)
@@ -553,6 +559,22 @@ def create_app(test_config=None):
             stats["vacation_remaining_year"] += float(
                 balance["projected"] - balance["used_scheduled"]
             )
+
+            sickness_month = sickness_hours_for_period(
+                worker_obj, absences_list, period_start, period_end
+            )
+            stats["sickness_paid_month"] += float(sickness_month["paid_hours"])
+            stats["sickness_unpaid_month"] += float(sickness_month["unpaid_hours"])
+
+            sickness_year = sickness_year_entitlement(
+                worker_obj, absences_list, year, period_end
+            )
+            if sickness_year["known"]:
+                stats["sickness_paid_remaining_year"] += float(
+                    sickness_year["remaining_hours"]
+                )
+            else:
+                stats["sickness_rule_known"] = False
         recent = (
             WorkEntry.query.filter(
                 WorkEntry.work_date >= period_start,

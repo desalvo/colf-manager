@@ -102,3 +102,7 @@ From r37 the same calendar dialog lets the user select **Paid work**, **Vacation
 Recent calendar entries are displayed in a dedicated right-side column as graphical draggable pills. Dropping one onto a new day preserves the entry type, original start/end times, worker, employer relationship, location and break; vacation and sickness items also preserve paid status and configured paid hours. Event colors are kept consistent across month, week and day views.
 
 On the Reports page, the worker is selected automatically when only one worker exists. A new **Hours trend by location** PDF is also available, with annual totals and monthly paid-work-hour breakdowns by location.
+
+### Sickness indicators on the Dashboard
+
+For the selected month, the Dashboard shows recorded paid and unpaid sickness hours. It also shows the remaining annual paid-sickness entitlement. The domestic-work collective agreement expresses the ceiling in days (8, 10 or 15 depending on seniority); the application converts the remaining entitlement to hours using weekly hours divided by 6. For periods outside the verified contractual rules the value is shown as N/A.

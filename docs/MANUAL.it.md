@@ -102,3 +102,7 @@ Dalla r37 la stessa finestra del calendario consente di scegliere **Ore retribui
 Nel calendario gli inserimenti recenti sono disponibili in una colonna dedicata a destra sotto forma di elementi grafici trascinabili. Il rilascio su un nuovo giorno conserva tipo di registrazione, orari di inizio/fine, lavoratore, relazione con il datore, luogo e pausa; per ferie e malattia conserva anche lo stato retribuito e le ore pagate configurate. I colori degli eventi sono coerenti nelle viste mese, settimana e giorno.
 
 Nella pagina Report, quando è presente un solo lavoratore questo viene selezionato automaticamente. È inoltre disponibile il PDF **Andamento ore per luogo**, con totale annuale e dettaglio mensile delle ore retribuite distinte per luogo.
+
+### Indicatori malattia in Panoramica
+
+La Panoramica mostra, per il mese selezionato, le ore di malattia retribuita e non retribuita registrate. Mostra inoltre il residuo annuo retribuibile. Il CCNL esprime il massimale in giorni (8, 10 o 15 in funzione dell’anzianità); l’app converte il residuo in ore usando l’orario settimanale diviso per 6. Per periodi non coperti dalle regole contrattuali verificate il valore è mostrato come N/D.

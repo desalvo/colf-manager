@@ -136,7 +136,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 @media(max-width:850px){.calendar-shell{grid-template-columns:1fr}.calendar-rail{position:static;grid-row:auto}.quick-entry-panel{order:-1}}
 
 
-/* r43 three-line ultra-compact drag chips and always-visible calendar time ranges */
+/* r44 three-line ultra-compact drag chips and always-visible calendar time ranges */
 .calendar-shell{grid-template-columns:minmax(0,1fr) 170px;gap:12px}
 .calendar-rail{min-width:0}
 .recent-patterns{justify-items:start;gap:7px}
@@ -200,7 +200,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 }
 
 
-/* r43 strict three-row recent chips and viewport-contained calendar rail */
+/* r44 strict three-row recent chips and viewport-contained calendar rail */
 .calendar-shell{
   width:100%;
   max-width:100%;

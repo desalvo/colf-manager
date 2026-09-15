@@ -1,6 +1,6 @@
 # fmt: off
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 CENT = Decimal("0.01")
@@ -284,3 +284,130 @@ def combined_thirteenth_tfr_summary(worker, entries, absences, expenses, rates, 
     inps = inps_contribution_summary(worker, annual, year)
     taxes = estimated_irpef_summary(worker, annual, year) if worker.inps_number and worker.contract_number else None
     return {"cutoff": th["cutoff"], "thirteenth": th, "tfr": tfr, "annual": annual, "inps": inps, "taxes": taxes}
+
+# Domestic-work sickness rules verified against the Italian domestic-work CCNL.
+# The paid-sickness entitlement is expressed by the CCNL in calendar days;
+# the UI converts the remaining entitlement to hours using weekly_hours / 6.
+# The 8/10/15-day thresholds have remained unchanged in the verified CCNL texts
+# from 2001 through the agreement currently effective until 2028-10-31.
+SICKNESS_RULES_VERIFIED_FROM = date(2001, 3, 8)
+SICKNESS_RULES_VERIFIED_TO = date(2028, 10, 31)
+SICKNESS_RULE_SOURCE = "CCNL lavoro domestico – malattia: 8/10/15 giorni retribuiti annui secondo anzianità"
+
+
+def _add_months(day, months):
+    month_index = day.month - 1 + months
+    year = day.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, min(day.day, monthrange(year, month)[1]))
+
+
+def _add_years(day, years):
+    target_year = day.year + years
+    return date(target_year, day.month, min(day.day, monthrange(target_year, day.month)[1]))
+
+
+def sickness_paid_days_limit(worker, as_of):
+    """Return the CCNL paid-sickness day ceiling applicable at *as_of*.
+
+    Returns None when the selected date is outside the period for which this
+    package has a verified contractual rule table.  The threshold is 8 days
+    through six months' seniority, 10 days above six months through two years,
+    and 15 days above two years.
+    """
+    if as_of < SICKNESS_RULES_VERIFIED_FROM or as_of > SICKNESS_RULES_VERIFIED_TO:
+        return None
+    if as_of < worker.employment_start:
+        return Decimal("0")
+    if as_of <= _add_months(worker.employment_start, 6):
+        return Decimal("8")
+    if as_of <= _add_years(worker.employment_start, 2):
+        return Decimal("10")
+    return Decimal("15")
+
+
+def sickness_contract_hours_per_day(worker):
+    """Convert one CCNL sickness day to hours for dashboard display.
+
+    Domestic-work contractual daily values use a six-day reference week; this
+    is therefore a display conversion of a day-based entitlement, not a new
+    statutory hourly ceiling.
+    """
+    weekly = Decimal(worker.weekly_hours or 0)
+    return (weekly / Decimal("6")).quantize(CENT) if weekly else Decimal("0.00")
+
+
+def _absence_interval_hours(absence, worker=None):
+    start_clock = absence.start_time
+    end_clock = absence.end_time
+    if start_clock is not None and end_clock is not None:
+        seconds = Decimal(
+            (datetime.combine(date.today(), end_clock) - datetime.combine(date.today(), start_clock)).total_seconds()
+        )
+        return max(Decimal("0"), seconds / Decimal(3600))
+    if worker is not None:
+        daily = sickness_contract_hours_per_day(worker)
+        if daily:
+            return daily
+    return Decimal("8")
+
+
+def sickness_hours_for_period(worker, absences, period_start, period_end):
+    """Return recorded paid/unpaid sickness hours overlapping a period."""
+    paid = Decimal("0")
+    unpaid = Decimal("0")
+    for absence in absences:
+        if absence.kind != "sickness":
+            continue
+        overlap_start = max(absence.start_date, period_start)
+        overlap_end = min(absence.end_date, period_end)
+        if overlap_start > overlap_end:
+            continue
+        event_days = Decimal((absence.end_date - absence.start_date).days + 1)
+        overlap_days = Decimal((overlap_end - overlap_start).days + 1)
+        interval_hours = _absence_interval_hours(absence, worker)
+        total_overlap_hours = interval_hours * overlap_days
+        paid_total = Decimal(absence.paid_hours or 0) if absence.paid else Decimal("0")
+        paid_overlap = (paid_total / event_days * overlap_days) if event_days else Decimal("0")
+        paid_overlap = max(Decimal("0"), min(total_overlap_hours, paid_overlap))
+        paid += paid_overlap
+        unpaid += max(Decimal("0"), total_overlap_hours - paid_overlap)
+    return {
+        "paid_hours": money(paid),
+        "unpaid_hours": money(unpaid),
+    }
+
+
+def sickness_year_entitlement(worker, absences, year, as_of=None):
+    """Return paid-sickness usage and remaining entitlement for a selected year.
+
+    The CCNL ceiling is day-based.  ``limit_hours`` and ``remaining_hours`` are
+    dashboard conversions using weekly_hours / 6 so the user can compare the
+    entitlement with hour-based sickness records.
+    """
+    year_start = date(year, 1, 1)
+    year_end = date(year, 12, 31)
+    cutoff = min(as_of or year_end, year_end)
+    limit_days = sickness_paid_days_limit(worker, cutoff)
+    used = sickness_hours_for_period(worker, absences, year_start, cutoff)["paid_hours"]
+    if limit_days is None:
+        return {
+            "known": False,
+            "limit_days": None,
+            "daily_hours": None,
+            "limit_hours": None,
+            "used_paid_hours": used,
+            "remaining_hours": None,
+            "source": SICKNESS_RULE_SOURCE,
+        }
+    daily_hours = sickness_contract_hours_per_day(worker)
+    limit_hours = money(limit_days * daily_hours)
+    return {
+        "known": True,
+        "limit_days": limit_days,
+        "daily_hours": daily_hours,
+        "limit_hours": limit_hours,
+        "used_paid_hours": used,
+        "remaining_hours": money(max(Decimal("0"), limit_hours - used)),
+        "source": SICKNESS_RULE_SOURCE,
+    }

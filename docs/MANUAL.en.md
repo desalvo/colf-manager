@@ -106,3 +106,13 @@ On the Reports page, the worker is selected automatically when only one worker e
 ### Sickness indicators on the Dashboard
 
 For the selected month, the Dashboard shows recorded paid and unpaid sickness hours. It also shows the remaining annual paid-sickness entitlement. The domestic-work collective agreement expresses the ceiling in days (8, 10 or 15 depending on seniority); the application converts the remaining entitlement to hours using weekly hours divided by 6. For periods outside the verified contractual rules the value is shown as N/A.
+
+
+## r47: addresses, dashboard and export
+
+Workers and employers now include City, Province and Postal Code. Report signature place defaults to the employer city. The Dashboard uses a more compact KPI layout and the Period activity section, now including the worker name, is collapsed by default. Full export explicitly supports time values (`datetime.time`) used by calendar entries.
+
+
+## r48: calendar subscriptions and settings
+
+**Settings** now includes the external application URL and read-only calendar subscriptions for individual workers or employers. Each enabled calendar exposes a token-protected **ICS** link and **CalDAV** endpoint; employer calendars aggregate events for their associated workers. Feeds include paid work, vacation and sickness. Personal password changes are now integrated into Settings.

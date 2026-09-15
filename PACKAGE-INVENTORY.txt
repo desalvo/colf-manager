@@ -44,12 +44,14 @@ migrations/versions/1001_employers_vacation_reports.py
 migrations/versions/1002_contract_tax_reporting.py
 migrations/versions/1003_locations.py
 migrations/versions/1004_generated_reports.py
+migrations/versions/1005_person_address_fields.py
 output/pdf/colf-manager-manual-v1.0.0-en.pdf
 output/pdf/colf-manager-manual-v1.0.0-it.pdf
 pyproject.toml
 scripts/build-package.sh
 scripts/check-all.sh
 scripts/check-local.sh
+scripts/compose-config-check.sh
 scripts/generate-manuals.py
 scripts/k8s-delete-application-pvc.sh
 scripts/k8s-delete-application.sh

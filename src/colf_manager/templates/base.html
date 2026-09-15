@@ -30,12 +30,11 @@
       <a href="/documents" title="Documenti"><span class="nav-icon">▤</span><span class="nav-label">Documenti</span></a>
       <a href="/reports" title="Report e paghe"><span class="nav-icon">▥</span><span class="nav-label">Report e paghe</span></a>
       <a href="/mail/compose" title="Invia comunicazione"><span class="nav-icon">✉</span><span class="nav-label">Invia e-mail</span></a>
-      <a href="/account/password" title="Password"><span class="nav-icon">◉</span><span class="nav-label">Password</span></a>
       {% if current_user.is_admin %}
       <a href="/admin/users" title="Utenti"><span class="nav-icon">♟</span><span class="nav-label">Utenti</span></a>
       <a href="/admin/archive" title="Import / Export"><span class="nav-icon">⇅</span><span class="nav-label">Import / Export</span></a>
-      <a href="/settings" title="Impostazioni"><span class="nav-icon">⚙</span><span class="nav-label">Impostazioni</span></a>
       {% endif %}
+      <a href="/settings" title="Impostazioni"><span class="nav-icon">⚙</span><span class="nav-label">Impostazioni</span></a>
     </nav>
     <form method="post" action="/logout" class="logout-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

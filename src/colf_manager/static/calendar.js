@@ -218,7 +218,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
-    initialView: 'timeGridWeek',
+    initialView: window.matchMedia('(max-width: 850px)').matches ? 'dayGridMonth' : 'timeGridWeek',
     locale: 'it',
     firstDay: 1,
     editable: true,
@@ -286,6 +286,14 @@ document.addEventListener('DOMContentLoaded', () => {
         calendar.refetchEvents();
       } catch (error) { alert(error.message); info.event.remove(); }
     },
+    datesSet: (info) => {
+      const calendarEl = document.getElementById('calendar');
+      calendarEl.classList.toggle('timegrid-active', info.view.type.startsWith('timeGrid'));
+      window.requestAnimationFrame(() => calendar.updateSize());
+    },
+    windowResize: () => {
+      window.requestAnimationFrame(() => calendar.updateSize());
+    },
     eventContent: (arg) => {
       const props = arg.event.extendedProps;
       const wrap = document.createElement('div');
@@ -333,6 +341,10 @@ document.addEventListener('DOMContentLoaded', () => {
     },
   });
   calendar.render();
+  window.requestAnimationFrame(() => calendar.updateSize());
+  window.addEventListener('orientationchange', () => {
+    window.setTimeout(() => calendar.updateSize(), 120);
+  });
   initExternalPatterns();
   document.getElementById('workerFilter').addEventListener('change', () => calendar.refetchEvents());
 

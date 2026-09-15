@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager full package r45: production gate =="
+echo "== colf-manager full package r54: production gate =="
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" && -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: activate .venv first for local execution." >&2
@@ -19,11 +19,7 @@ pytest
 bandit -q -r src -x tests
 pip-audit .
 
-env \
-  POSTGRES_PASSWORD='validation-only-postgres-password' \
-  COLF_MANAGER_SECRET_KEY='validation-only-secret-key-0123456789abcdef0123456789abcdef' \
-  COLF_MANAGER_ADMIN_PASSWORD='Validation-admin-password-1234' \
-  docker compose config --quiet
+scripts/compose-config-check.sh
 
 COLF_MANAGER_PRODUCTION=0 COLF_MANAGER_DATA="$(mktemp -d)"   flask --app colf_manager.app:create_app db heads
 
@@ -101,7 +97,7 @@ if any(count < 2 for count in pages.values()):
 
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r45-full",
+    "overlay_revision": "r54-full",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -129,4 +125,4 @@ Path("dist/production-evidence.json").write_text(
 )
 PY
 
-echo "Production gate r45 full passed."
+echo "Production gate r54 full passed."

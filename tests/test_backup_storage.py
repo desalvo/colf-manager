@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from io import BytesIO
 from pathlib import Path
 import os
@@ -8,7 +8,7 @@ import pytest
 
 from colf_manager.app import create_app
 from colf_manager.backup import create_full_export, restore_full_export
-from colf_manager.models import AuditLog, Document, GeneratedReport, Worker, db
+from colf_manager.models import AuditLog, Document, GeneratedReport, WorkEntry, Worker, db
 from colf_manager.storage import cleanup_orphan_files, safe_unlink, store_report
 
 
@@ -105,6 +105,31 @@ def test_full_export_round_trip_restores_database_and_files(archive_app):
         report = GeneratedReport.query.one()
         assert (Path(archive_app.config["UPLOAD_FOLDER"]) / document.stored_name).is_file()
         assert (Path(archive_app.config["REPORT_FOLDER"]) / report.stored_name).is_file()
+
+
+def test_full_export_round_trip_preserves_time_values(archive_app):
+    worker_id, _ = _seed_archive_data(archive_app)
+    with archive_app.app_context():
+        entry = WorkEntry(
+            worker_id=worker_id,
+            work_date=date(2026, 9, 15),
+            start_time=time(8, 30),
+            end_time=time(12, 45),
+            break_minutes=15,
+            location="Casa",
+        )
+        db.session.add(entry)
+        db.session.commit()
+        entry_id = entry.id
+
+        archive = create_full_export(archive_app)
+        with archive.open("rb") as stream:
+            restore_full_export(archive_app, stream)
+
+        restored = db.session.get(WorkEntry, entry_id)
+        assert restored is not None
+        assert restored.start_time == time(8, 30)
+        assert restored.end_time == time(12, 45)
 
 
 def test_restore_rejects_unsafe_archive_member(archive_app):

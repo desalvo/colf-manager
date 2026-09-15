@@ -1,4 +1,12 @@
-## r45-full - 2026-09-14
+## r54-full - 2026-09-15
+
+- Added tokenized, revocable read-only calendar subscriptions for each worker and employer in ICS and CalDAV formats.
+- Added External Application URL setting used when publishing calendar subscription links.
+- Moved the regular password-change workflow into Settings and exposed Settings to authenticated users while keeping administrative sections admin-only.
+- Added tests for external subscription URLs, ICS event content, and password changes from Settings.
+- Retained required Compose secrets; validation scripts continue to inject validation-only values instead of introducing insecure defaults.
+
+## r47-full - 2026-09-14
 
 - Dashboard: added monthly thirteenth accrual, year-to-date thirteenth accrual, year-to-date TFR accrual, vacation days used in the selected month, and projected vacation days remaining in the year.
 - Dashboard annual indicators now use the selected month end as cutoff while preserving existing monthly statistics.
@@ -144,7 +152,7 @@
 - Close the mobile drawer when selecting a navigation link or pressing Escape.
 - Keep desktop navigation behavior unchanged and improve mobile accessibility with `aria-controls` and `aria-expanded`.
 
-## r45-full - 2026-09-14
+## r47-full - 2026-09-14
 
 - Ridisegnata la navigazione: sidebar sempre disponibile, minimizzabile su desktop e drawer accessibile su mobile.
 - Nuovo calendario time-grid con blocchi proporzionali alla durata, colori contestuali, modifica/cancellazione e drag-and-drop degli inserimenti recenti.

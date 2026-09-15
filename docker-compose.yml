@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: colf_manager
       POSTGRES_USER: colf_manager
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
     volumes: ["postgres-data:/var/lib/postgresql"]
     healthcheck: {test: ["CMD-SHELL", "pg_isready -U colf_manager"], interval: 10s, timeout: 5s, retries: 10}
     security_opt: ["no-new-privileges:true"]
@@ -13,9 +13,9 @@ services:
     build: .
     image: desalvo/colf-manager:${COLF_MANAGER_IMAGE_TAG:-latest}
     environment: &app-env
-      DATABASE_URL: postgresql+psycopg://colf_manager:${POSTGRES_PASSWORD}@db/colf_manager
-      COLF_MANAGER_SECRET_KEY: ${COLF_MANAGER_SECRET_KEY:?set COLF_MANAGER_SECRET_KEY}
-      COLF_MANAGER_ADMIN_PASSWORD: ${COLF_MANAGER_ADMIN_PASSWORD:?set COLF_MANAGER_ADMIN_PASSWORD}
+      DATABASE_URL: postgresql+psycopg://colf_manager:${POSTGRES_PASSWORD:-}@db/colf_manager
+      COLF_MANAGER_SECRET_KEY: ${COLF_MANAGER_SECRET_KEY:-}
+      COLF_MANAGER_ADMIN_PASSWORD: ${COLF_MANAGER_ADMIN_PASSWORD:-}
       COLF_MANAGER_PRODUCTION: "1"
       COLF_MANAGER_SECURE_COOKIES: ${COLF_MANAGER_SECURE_COOKIES:-0}
       COLF_MANAGER_PROXY_FIX: ${COLF_MANAGER_PROXY_FIX:-0}

@@ -5,7 +5,7 @@ import json
 import shutil
 import tempfile
 import zipfile
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,6 +22,8 @@ def _encode(value):
         return {"__type__": "datetime", "value": value.isoformat()}
     if isinstance(value, date):
         return {"__type__": "date", "value": value.isoformat()}
+    if isinstance(value, time):
+        return {"__type__": "time", "value": value.isoformat()}
     if isinstance(value, Decimal):
         return {"__type__": "decimal", "value": str(value)}
     return value
@@ -36,6 +38,8 @@ def _decode(value):
         return datetime.fromisoformat(raw)
     if kind == "date":
         return date.fromisoformat(raw)
+    if kind == "time":
+        return time.fromisoformat(raw)
     if kind == "decimal":
         return Decimal(raw)
     return raw

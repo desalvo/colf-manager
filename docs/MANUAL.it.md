@@ -106,3 +106,13 @@ Nella pagina Report, quando è presente un solo lavoratore questo viene selezion
 ### Indicatori malattia in Panoramica
 
 La Panoramica mostra, per il mese selezionato, le ore di malattia retribuita e non retribuita registrate. Mostra inoltre il residuo annuo retribuibile. Il CCNL esprime il massimale in giorni (8, 10 o 15 in funzione dell’anzianità); l’app converte il residuo in ore usando l’orario settimanale diviso per 6. Per periodi non coperti dalle regole contrattuali verificate il valore è mostrato come N/D.
+
+
+## Novità r47: indirizzi, panoramica ed export
+
+Lavoratori e datori dispongono ora dei campi Città, Provincia e CAP. Nei report il luogo firma proposto usa per default la città del datore di lavoro. La Panoramica usa indicatori più compatti e la sezione Attività del periodo, che include anche il nome del lavoratore, è collassata per default. L'export completo supporta esplicitamente i valori orari (`datetime.time`) presenti nelle registrazioni di calendario.
+
+
+## Novità r48: sottoscrizioni calendario e impostazioni
+
+In **Impostazioni** è possibile configurare la URL esterna dell'applicazione e attivare una sottoscrizione in sola lettura per il calendario di un singolo lavoratore o di un datore di lavoro. Per ogni calendario attivato vengono mostrati un link **ICS** e un endpoint **CalDAV** protetti da token casuale revocabile. Il calendario del datore aggrega gli eventi dei lavoratori associati. I feed includono ore retribuite, ferie e malattia. Il cambio password personale è ora integrato nella stessa pagina Impostazioni.

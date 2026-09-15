@@ -4,14 +4,17 @@ import os
 import secrets
 import zipfile
 from calendar import monthrange
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from io import BytesIO
 from decimal import Decimal
 from functools import wraps
 from pathlib import Path
 from uuid import uuid4
+from urllib.parse import urlsplit
+from html import escape as html_escape
 
 from flask import (
+    Response,
     Flask,
     current_app,
     abort,
@@ -126,6 +129,40 @@ def _calendar_color(worker_id, employer_id, location_id):
     return f"hsl({hue} 52% 39%)"
 
 
+def _calendar_token_key(kind, object_id):
+    if kind not in {"worker", "employer"}:
+        raise ValueError("Tipo calendario non valido")
+    return f"calendar_subscription_{kind}_{int(object_id)}"
+
+
+def _calendar_escape(value):
+    return (
+        str(value or "")
+        .replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\n", "\\n")
+    )
+
+
+def _calendar_fold(line, limit=73):
+    chunks = []
+    current = line
+    while len(current.encode("utf-8")) > limit:
+        cut = min(len(current), limit)
+        while len(current[:cut].encode("utf-8")) > limit and cut > 1:
+            cut -= 1
+        chunks.append(current[:cut])
+        current = " " + current[cut:]
+    chunks.append(current)
+    return "\r\n".join(chunks)
+
+
+def _external_base_url():
+    configured = (_setting("external_url", "") or "").strip().rstrip("/")
+    return configured or request.url_root.rstrip("/")
+
+
 # Stable, application-specific PostgreSQL advisory lock key. The lock is
 # session scoped and therefore also serializes bootstrap across replicas.
 DATABASE_BOOTSTRAP_LOCK_ID = 1129270342
@@ -224,6 +261,23 @@ def _ensure_legacy_schema_compatibility():
             db.session.commit()
 
     inspector = inspect(db.engine)
+    if "employer" in inspector.get_table_names():
+        columns = {c["name"] for c in inspector.get_columns("employer")}
+        statements = []
+        additions = {
+            "city": "VARCHAR(120)",
+            "province": "VARCHAR(2)",
+            "postal_code": "VARCHAR(10)",
+        }
+        for column, ddl in additions.items():
+            if column not in columns:
+                statements.append(f"ALTER TABLE employer ADD COLUMN {column} {ddl}")
+        for statement in statements:
+            db.session.execute(text(statement))
+        if statements:
+            db.session.commit()
+
+    inspector = inspect(db.engine)
     if "worker" in inspector.get_table_names():
         columns = {c["name"] for c in inspector.get_columns("worker")}
         statements = []
@@ -231,6 +285,9 @@ def _ensure_legacy_schema_compatibility():
             "employer_id": "INTEGER",
             "birth_date": "DATE",
             "address": "TEXT",
+            "city": "VARCHAR(120)",
+            "province": "VARCHAR(2)",
+            "postal_code": "VARCHAR(10)",
             "phone": "VARCHAR(40)",
             "email": "VARCHAR(255)",
             "employment_end": "DATE",
@@ -387,7 +444,7 @@ def create_app(test_config=None):
         if (
             current_user.is_authenticated
             and current_user.must_change_password
-            and request.endpoint not in {"change_password", "logout", "static", "health"}
+            and request.endpoint not in {"settings", "change_password", "logout", "static", "health"}
         ):
             return redirect(url_for("change_password"))
         return None
@@ -424,7 +481,7 @@ def create_app(test_config=None):
             ):
                 login_user(user)
                 audit("login", "user", user.id, user_id=user.id)
-                return redirect(url_for("change_password" if user.must_change_password else "dashboard"))
+                return redirect(url_for("settings" if user.must_change_password else "dashboard"))
             audit("login_failed", details=f"username={username}")
             flash("Credenziali non valide", "error")
         return render_template("login.html")
@@ -589,6 +646,7 @@ def create_app(test_config=None):
             workers=workers,
             stats=stats,
             recent=recent,
+            worker_map={worker.id: worker for worker in workers},
             today=today,
             selected_year=year,
             selected_month=month,
@@ -610,6 +668,9 @@ def create_app(test_config=None):
         worker.fiscal_code = (request.form.get("fiscal_code") or "").strip() or None
         worker.birth_date = _optional_date(request.form.get("birth_date"), "Data di nascita")
         worker.address = (request.form.get("address") or "").strip() or None
+        worker.city = (request.form.get("city") or "").strip()[:120] or None
+        worker.province = (request.form.get("province") or "").strip().upper()[:2] or None
+        worker.postal_code = (request.form.get("postal_code") or "").strip()[:10] or None
         worker.phone = (request.form.get("phone") or "").strip()[:40] or None
         worker.email = (request.form.get("email") or "").strip()[:255] or None
         worker.inps_number = (request.form.get("inps_number") or "").strip() or None
@@ -700,6 +761,9 @@ def create_app(test_config=None):
         employer.fiscal_code = (request.form.get("fiscal_code") or "").strip() or None
         employer.birth_date = _optional_date(request.form.get("birth_date"), "Data di nascita")
         employer.address = (request.form.get("address") or "").strip() or None
+        employer.city = (request.form.get("city") or "").strip()[:120] or None
+        employer.province = (request.form.get("province") or "").strip().upper()[:2] or None
+        employer.postal_code = (request.form.get("postal_code") or "").strip()[:10] or None
         employer.phone = (request.form.get("phone") or "").strip()[:40] or None
         employer.email = (request.form.get("email") or "").strip()[:255] or None
         employer.notes = (request.form.get("notes") or "").strip() or None
@@ -1495,8 +1559,8 @@ def create_app(test_config=None):
         if mode not in {"none", "worker", "employer", "both"}:
             mode = default_mode
         place = (request.args.get("signature_place") or "").strip()
-        if not place and employer and employer.address:
-            place = employer.address
+        if not place and employer:
+            place = employer.city or employer.address or ""
         report_date = request.args.get("report_date") or date.today().isoformat()
         try:
             parsed_date = date.fromisoformat(report_date)
@@ -1555,7 +1619,7 @@ def create_app(test_config=None):
             flash(str(exc), "error")
         selected = db.session.get(Worker, worker_id) if worker_id else None
         selected_employer = _employer_for(selected) if selected else None
-        default_place = selected_employer.address if selected_employer and selected_employer.address else ""
+        default_place = (selected_employer.city or selected_employer.address or "") if selected_employer else ""
         return render_template(
             "reports.html",
             workers=workers,
@@ -1725,18 +1789,244 @@ def create_app(test_config=None):
         flash("Report eliminato", "success")
         return redirect(url_for("reports"))
 
-    @app.route("/settings", methods=["GET", "POST"])
-    @admin_required
-    def settings():
-        keys = [
-            "calendar_recent_limit", "smtp_host", "smtp_port", "smtp_security",
-            "smtp_username", "smtp_password", "smtp_from_email", "smtp_from_name",
-            "auth_methods",
+    def _calendar_subject(kind, object_id):
+        if kind == "worker":
+            obj = db.session.get(Worker, object_id)
+            if obj is None:
+                abort(404)
+            return obj, f"{obj.first_name} {obj.last_name}", [obj.id]
+        if kind == "employer":
+            obj = db.session.get(Employer, object_id)
+            if obj is None:
+                abort(404)
+            worker_ids = [row.id for row in Worker.query.filter_by(employer_id=obj.id).all()]
+            return obj, f"{obj.first_name} {obj.last_name}", worker_ids
+        abort(404)
+
+    def _subscription_token(kind, object_id, create=False):
+        key = _calendar_token_key(kind, object_id)
+        token = _setting(key, "") or ""
+        if create and not token:
+            token = secrets.token_urlsafe(32)
+            _save_setting(key, token)
+            db.session.commit()
+        return token
+
+    def _subscription_authorized(kind, object_id, token):
+        expected = _subscription_token(kind, object_id, create=False)
+        return bool(expected and token and secrets.compare_digest(expected, token))
+
+    def _calendar_ics(kind, object_id):
+        _, label, worker_ids = _calendar_subject(kind, object_id)
+        lines = [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//colf-manager//Calendar subscription//IT",
+            "CALSCALE:GREGORIAN",
+            "METHOD:PUBLISH",
+            f"X-WR-CALNAME:{_calendar_escape('colf-manager · ' + label)}",
         ]
+        if worker_ids:
+            workers = {w.id: w for w in Worker.query.filter(Worker.id.in_(worker_ids)).all()}
+            entries = (
+                WorkEntry.query.filter(WorkEntry.worker_id.in_(worker_ids))
+                .order_by(WorkEntry.work_date, WorkEntry.start_time)
+                .all()
+            )
+            for entry in entries:
+                worker = workers.get(entry.worker_id)
+                worker_name = f"{worker.first_name} {worker.last_name}" if worker else "Lavoratore"
+                start = datetime.combine(entry.work_date, entry.start_time)
+                end = datetime.combine(entry.work_date, entry.end_time)
+                lines.extend(
+                    [
+                        "BEGIN:VEVENT",
+                        f"UID:work-{entry.id}@colf-manager",
+                        f"DTSTAMP:{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}",
+                        f"DTSTART:{start.strftime('%Y%m%dT%H%M%S')}",
+                        f"DTEND:{end.strftime('%Y%m%dT%H%M%S')}",
+                        f"SUMMARY:{_calendar_escape('Ore · ' + worker_name)}",
+                        f"LOCATION:{_calendar_escape(entry.location)}",
+                        f"DESCRIPTION:{_calendar_escape(entry.notes or '')}",
+                        "END:VEVENT",
+                    ]
+                )
+            absences = (
+                Absence.query.filter(Absence.worker_id.in_(worker_ids))
+                .order_by(Absence.start_date, Absence.start_time)
+                .all()
+            )
+            for absence in absences:
+                worker = workers.get(absence.worker_id)
+                worker_name = f"{worker.first_name} {worker.last_name}" if worker else "Lavoratore"
+                current = absence.start_date
+                while current <= absence.end_date:
+                    start_time = absence.start_time or time(9, 0)
+                    end_time = absence.end_time or time(17, 0)
+                    start = datetime.combine(current, start_time)
+                    end = datetime.combine(current, end_time)
+                    kind_label = "Ferie" if absence.kind == "vacation" else "Malattia"
+                    lines.extend(
+                        [
+                            "BEGIN:VEVENT",
+                            f"UID:absence-{absence.id}-{current.isoformat()}@colf-manager",
+                            f"DTSTAMP:{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}",
+                            f"DTSTART:{start.strftime('%Y%m%dT%H%M%S')}",
+                            f"DTEND:{end.strftime('%Y%m%dT%H%M%S')}",
+                            f"SUMMARY:{_calendar_escape(kind_label + ' · ' + worker_name)}",
+                            f"DESCRIPTION:{_calendar_escape(absence.notes or '')}",
+                            "END:VEVENT",
+                        ]
+                    )
+                    current += timedelta(days=1)
+        lines.append("END:VCALENDAR")
+        return "\r\n".join(_calendar_fold(line) for line in lines) + "\r\n"
+
+    @app.get("/calendar-subscriptions/<kind>/<int:object_id>/<token>/calendar.ics")
+    def calendar_subscription_ics(kind, object_id, token):
+        if not _subscription_authorized(kind, object_id, token):
+            abort(404)
+        payload = _calendar_ics(kind, object_id)
+        response = Response(payload, mimetype="text/calendar")
+        response.headers["Content-Disposition"] = 'inline; filename="colf-manager.ics"'
+        response.headers["Cache-Control"] = "private, max-age=300"
+        return response
+
+    @app.route(
+        "/caldav/<kind>/<int:object_id>/<token>/",
+        methods=["GET", "OPTIONS", "PROPFIND", "REPORT"],
+    )
+    def calendar_subscription_caldav(kind, object_id, token):
+        if not _subscription_authorized(kind, object_id, token):
+            abort(404)
+        _, label, _ = _calendar_subject(kind, object_id)
+        collection_href = request.path
+        calendar_href = collection_href + "calendar.ics"
+        if request.method == "OPTIONS":
+            response = Response(status=204)
+            response.headers["Allow"] = "OPTIONS, GET, PROPFIND, REPORT"
+            response.headers["DAV"] = "1, calendar-access"
+            return response
+        if request.method == "GET":
+            return redirect(calendar_href)
+        if request.method == "REPORT":
+            calendar_data = _calendar_ics(kind, object_id)
+            xml = (
+                '<?xml version="1.0" encoding="utf-8"?>'
+                '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+                '<d:response><d:href>'
+                + calendar_href
+                + '</d:href><d:propstat><d:prop><d:getetag>"colf-manager"</d:getetag>'
+                '<c:calendar-data><![CDATA['
+                + calendar_data
+                + ']]></c:calendar-data></d:prop><d:status>HTTP/1.1 200 OK</d:status>'
+                '</d:propstat></d:response></d:multistatus>'
+            )
+            response = Response(xml, status=207, mimetype="application/xml")
+            response.headers["DAV"] = "1, calendar-access"
+            return response
+        display_name = html_escape(f"colf-manager · {label}", quote=True)
+        xml = (
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">'
+            '<d:response><d:href>'
+            + collection_href
+            + '</d:href><d:propstat><d:prop>'
+            '<d:resourcetype><d:collection/><c:calendar/></d:resourcetype>'
+            f'<d:displayname>{display_name}</d:displayname>'
+            '<c:supported-calendar-component-set><c:comp name="VEVENT"/></c:supported-calendar-component-set>'
+            '</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>'
+        )
+        response = Response(xml, status=207, mimetype="application/xml")
+        response.headers["DAV"] = "1, calendar-access"
+        return response
+
+    @app.get("/caldav/<kind>/<int:object_id>/<token>/calendar.ics")
+    def calendar_subscription_caldav_ics(kind, object_id, token):
+        return calendar_subscription_ics(kind, object_id, token)
+
+    @app.route("/settings", methods=["GET", "POST"])
+    @login_required
+    def settings():
+        admin_keys = [
+            "calendar_recent_limit",
+            "smtp_host",
+            "smtp_port",
+            "smtp_security",
+            "smtp_username",
+            "smtp_password",
+            "smtp_from_email",
+            "smtp_from_name",
+            "auth_methods",
+            "external_url",
+        ]
+        selected_kind = request.args.get("calendar_kind", "worker")
+        selected_id = request.args.get("calendar_id", type=int)
         if request.method == "POST":
+            action = request.form.get("action", "save_settings")
             try:
-                recent_limit = max(1, min(50, int(request.form.get("calendar_recent_limit", "10"))))
+                if action == "change_password":
+                    if not check_password_hash(
+                        current_user.password_hash, request.form.get("current_password", "")
+                    ):
+                        raise ValueError("Password attuale non valida")
+                    new_password = request.form.get("new_password", "")
+                    if new_password != request.form.get("confirm_password", ""):
+                        raise ValueError("Le nuove password non coincidono")
+                    validate_password(new_password)
+                    current_user.password_hash = generate_password_hash(new_password)
+                    current_user.must_change_password = False
+                    db.session.commit()
+                    audit("password_changed", "user", current_user.id)
+                    flash("Password aggiornata", "success")
+                    return redirect(url_for("settings") + "#password")
+
+                if action in {"calendar_select", "calendar_regenerate", "calendar_revoke"}:
+                    if not current_user.is_admin:
+                        abort(403)
+                    target = request.form.get("calendar_target", "")
+                    if ":" not in target:
+                        raise ValueError("Selezionare un calendario")
+                    selected_kind, raw_id = target.split(":", 1)
+                    selected_id = int(raw_id)
+                    _calendar_subject(selected_kind, selected_id)
+                    key = _calendar_token_key(selected_kind, selected_id)
+                    if action == "calendar_revoke":
+                        row = db.session.get(Setting, key)
+                        if row is not None:
+                            db.session.delete(row)
+                            db.session.commit()
+                        audit("calendar_subscription_revoked", selected_kind, selected_id)
+                        flash("Sottoscrizione revocata", "success")
+                        return redirect(url_for("settings") + "#calendar-subscriptions")
+                    token = secrets.token_urlsafe(32) if action == "calendar_regenerate" else None
+                    if token:
+                        _save_setting(key, token)
+                        db.session.commit()
+                    else:
+                        _subscription_token(selected_kind, selected_id, create=True)
+                    audit("calendar_subscription_enabled", selected_kind, selected_id)
+                    return redirect(
+                        url_for(
+                            "settings",
+                            calendar_kind=selected_kind,
+                            calendar_id=selected_id,
+                        )
+                        + "#calendar-subscriptions"
+                    )
+
+                if not current_user.is_admin:
+                    abort(403)
+                recent_limit = max(
+                    1, min(50, int(request.form.get("calendar_recent_limit", "10")))
+                )
                 _save_setting("calendar_recent_limit", recent_limit)
+                external_url = request.form.get("external_url", "").strip().rstrip("/")
+                if external_url:
+                    parsed = urlsplit(external_url)
+                    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                        raise ValueError("URL esterna non valida: usare http:// o https://")
+                _save_setting("external_url", external_url)
                 _save_setting("smtp_host", request.form.get("smtp_host", "").strip())
                 _save_setting("smtp_port", int(request.form.get("smtp_port", "587") or 587))
                 security = request.form.get("smtp_security", "starttls")
@@ -1747,7 +2037,9 @@ def create_app(test_config=None):
                 if request.form.get("smtp_password"):
                     _save_setting("smtp_password", request.form.get("smtp_password"))
                 _save_setting("smtp_from_email", request.form.get("smtp_from_email", "").strip())
-                _save_setting("smtp_from_name", request.form.get("smtp_from_name", "colf-manager").strip())
+                _save_setting(
+                    "smtp_from_name", request.form.get("smtp_from_name", "colf-manager").strip()
+                )
                 _save_setting("auth_methods", "local")
                 db.session.commit()
                 audit("settings_updated", "setting")
@@ -1756,7 +2048,8 @@ def create_app(test_config=None):
             except (ValueError, TypeError) as exc:
                 db.session.rollback()
                 flash(str(exc), "error")
-        values = {key: _setting(key, "") for key in keys}
+
+        values = {key: _setting(key, "") for key in admin_keys}
         values["calendar_recent_limit"] = values["calendar_recent_limit"] or "10"
         values["smtp_port"] = values["smtp_port"] or "587"
         values["smtp_security"] = values["smtp_security"] or "starttls"
@@ -1764,7 +2057,33 @@ def create_app(test_config=None):
         values["auth_methods"] = "local"
         values["smtp_password_configured"] = bool(values.get("smtp_password"))
         values.pop("smtp_password", None)
-        return render_template("settings.html", settings=values)
+
+        subscription = None
+        if current_user.is_admin and selected_id:
+            try:
+                _, label, _ = _calendar_subject(selected_kind, selected_id)
+                token = _subscription_token(selected_kind, selected_id, create=False)
+                if token:
+                    base = _external_base_url()
+                    subscription = {
+                        "kind": selected_kind,
+                        "id": selected_id,
+                        "label": label,
+                        "ics_url": f"{base}/calendar-subscriptions/{selected_kind}/{selected_id}/{token}/calendar.ics",
+                        "caldav_url": f"{base}/caldav/{selected_kind}/{selected_id}/{token}/",
+                    }
+            except (ValueError, TypeError):
+                subscription = None
+
+        return render_template(
+            "settings.html",
+            settings=values,
+            workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+            employers=Employer.query.order_by(Employer.last_name, Employer.first_name).all(),
+            subscription=subscription,
+            selected_kind=selected_kind,
+            selected_id=selected_id,
+        )
 
     def _smtp_settings():
         return {

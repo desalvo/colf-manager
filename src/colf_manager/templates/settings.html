@@ -1,1 +1,123 @@
-{% extends 'base.html' %}{% block content %}<div class="page-title"><span class="eyebrow">Configurazione applicativa</span><h1>⚙ Impostazioni</h1><p>Calendario, posta elettronica e metodi di autenticazione in un unico punto.</p></div><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="settings-grid"><section class="card"><h2>Calendario</h2><label>Inserimenti rapidi recenti<input type="number" min="1" max="50" name="calendar_recent_limit" value="{{settings.calendar_recent_limit}}"></label><p class="fineprint">Numero massimo di combinazioni trascinabili mostrate sulla destra del calendario.</p></section><section class="card"><h2>Autenticazione</h2><label>Metodo attivo<select name="auth_methods" disabled><option selected>Password locale</option></select></label><p class="fineprint">La release corrente supporta l'autenticazione locale. Il controllo è centralizzato qui per l'estensione futura ad altri provider.</p></section><section class="card span2"><h2>SMTP / SMTPS</h2><div class="formgrid"><label>Server SMTP<input name="smtp_host" value="{{settings.smtp_host}}" placeholder="smtp.example.org"></label><label>Porta<input type="number" name="smtp_port" value="{{settings.smtp_port}}"></label><label>Sicurezza<select name="smtp_security"><option value="starttls" {% if settings.smtp_security=='starttls' %}selected{% endif %}>STARTTLS</option><option value="ssl" {% if settings.smtp_security=='ssl' %}selected{% endif %}>SMTPS / SSL</option><option value="none" {% if settings.smtp_security=='none' %}selected{% endif %}>Nessuna</option></select></label><label>Username<input name="smtp_username" value="{{settings.smtp_username}}"></label><label>Password<input type="password" name="smtp_password" placeholder="{% if settings.smtp_password_configured %}Lascia vuoto per mantenerla{% else %}Password SMTP{% endif %}"></label><label>E-mail mittente<input type="email" name="smtp_from_email" value="{{settings.smtp_from_email}}"></label><label>Nome mittente<input name="smtp_from_name" value="{{settings.smtp_from_name}}"></label></div></section></div><div class="form-actions"><button>Salva impostazioni</button><a class="button secondary" href="/mail/compose">Prova invio e-mail</a></div></form>{% endblock %}
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-title">
+  <span class="eyebrow">Configurazione applicativa</span>
+  <h1>⚙ Impostazioni</h1>
+  <p>Account, calendario, collegamenti esterni e posta elettronica in un unico punto.</p>
+</div>
+
+<div class="settings-grid">
+  <section class="card" id="password">
+    <h2>Cambio password</h2>
+    <form method="post" class="formgrid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="change_password">
+      <label>Password attuale<input type="password" name="current_password" required autocomplete="current-password"></label>
+      <label>Nuova password<input type="password" name="new_password" required autocomplete="new-password"></label>
+      <label>Conferma nuova password<input type="password" name="confirm_password" required autocomplete="new-password"></label>
+      <div class="form-actions"><button>Modifica password</button></div>
+    </form>
+  </section>
+
+  {% if current_user.is_admin %}
+  <section class="card">
+    <h2>Applicazione</h2>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="save_settings">
+      <label>URL esterna dell'applicazione
+        <input type="url" name="external_url" value="{{ settings.external_url }}" placeholder="https://colf.example.org">
+      </label>
+      <p class="fineprint">Usata anche per generare i link di sottoscrizione ICS e CalDAV. Lascia vuoto per usare l'URL della richiesta corrente.</p>
+
+      <label>Inserimenti rapidi recenti
+        <input type="number" min="1" max="50" name="calendar_recent_limit" value="{{ settings.calendar_recent_limit }}">
+      </label>
+      <p class="fineprint">Numero massimo di combinazioni trascinabili mostrate sulla destra del calendario.</p>
+
+      <h3>Autenticazione</h3>
+      <label>Metodo attivo
+        <select name="auth_methods" disabled><option selected>Password locale</option></select>
+      </label>
+      <p class="fineprint">La release corrente supporta l'autenticazione locale; questa sezione resta il punto centrale per eventuali provider futuri.</p>
+
+      <h3>SMTP / SMTPS</h3>
+      <div class="formgrid">
+        <label>Server SMTP<input name="smtp_host" value="{{ settings.smtp_host }}" placeholder="smtp.example.org"></label>
+        <label>Porta<input type="number" name="smtp_port" value="{{ settings.smtp_port }}"></label>
+        <label>Sicurezza<select name="smtp_security"><option value="starttls" {% if settings.smtp_security=='starttls' %}selected{% endif %}>STARTTLS</option><option value="ssl" {% if settings.smtp_security=='ssl' %}selected{% endif %}>SMTPS / SSL</option><option value="none" {% if settings.smtp_security=='none' %}selected{% endif %}>Nessuna</option></select></label>
+        <label>Username<input name="smtp_username" value="{{ settings.smtp_username }}"></label>
+        <label>Password<input type="password" name="smtp_password" placeholder="{% if settings.smtp_password_configured %}Lascia vuoto per mantenerla{% else %}Password SMTP{% endif %}"></label>
+        <label>E-mail mittente<input type="email" name="smtp_from_email" value="{{ settings.smtp_from_email }}"></label>
+        <label>Nome mittente<input name="smtp_from_name" value="{{ settings.smtp_from_name }}"></label>
+      </div>
+      <div class="form-actions"><button>Salva impostazioni</button><a class="button secondary" href="/mail/compose">Prova invio e-mail</a></div>
+    </form>
+  </section>
+
+  <section class="card span2" id="calendar-subscriptions">
+    <div class="card-title"><div><h2>Sottoscrizioni calendario</h2><p class="fineprint">Condividi in sola lettura il calendario di un lavoratore o di un datore.</p></div></div>
+    <form method="post" class="calendar-subscription-picker">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="calendar_select">
+      <label>Calendario da condividere
+        <select name="calendar_target" required>
+          <option value="">Seleziona…</option>
+          <optgroup label="Lavoratori">
+            {% for worker in workers %}
+            <option value="worker:{{ worker.id }}" {% if selected_kind=='worker' and selected_id==worker.id %}selected{% endif %}>{{ worker.first_name }} {{ worker.last_name }}</option>
+            {% endfor %}
+          </optgroup>
+          <optgroup label="Datori di lavoro">
+            {% for employer in employers %}
+            <option value="employer:{{ employer.id }}" {% if selected_kind=='employer' and selected_id==employer.id %}selected{% endif %}>{{ employer.first_name }} {{ employer.last_name }}</option>
+            {% endfor %}
+          </optgroup>
+        </select>
+      </label>
+      <button>Mostra link di sottoscrizione</button>
+    </form>
+
+    {% if subscription %}
+    <div class="subscription-links">
+      <h3>{{ subscription.label }}</h3>
+      <label>ICS
+        <div class="copy-row"><input readonly value="{{ subscription.ics_url }}" aria-label="Link ICS"><button type="button" class="secondary copy-link" data-copy="{{ subscription.ics_url }}">Copia</button></div>
+      </label>
+      <label>CalDAV (sola lettura)
+        <div class="copy-row"><input readonly value="{{ subscription.caldav_url }}" aria-label="Link CalDAV"><button type="button" class="secondary copy-link" data-copy="{{ subscription.caldav_url }}">Copia</button></div>
+      </label>
+      <div class="form-actions">
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="calendar_regenerate">
+          <input type="hidden" name="calendar_target" value="{{ subscription.kind }}:{{ subscription.id }}">
+          <button class="secondary">Rigenera token</button>
+        </form>
+        <form method="post" onsubmit="return confirm('Revocare questa sottoscrizione? I link esistenti smetteranno di funzionare.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="calendar_revoke">
+          <input type="hidden" name="calendar_target" value="{{ subscription.kind }}:{{ subscription.id }}">
+          <button class="danger">Revoca</button>
+        </form>
+      </div>
+    </div>
+    {% elif selected_id %}
+      <p class="notice">La sottoscrizione selezionata non è attiva. Selezionala nuovamente per generare un nuovo token.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.querySelectorAll('.copy-link').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(button.dataset.copy || '');
+      const original = button.textContent;
+      button.textContent = 'Copiato';
+      setTimeout(() => { button.textContent = original; }, 1200);
+    });
+  });
+</script>
+{% endblock %}

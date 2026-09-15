@@ -1,5 +1,5 @@
 """colf-manager package metadata."""
 
 __version__ = "1.0.0"
-__build__ = "r45-full"
+__build__ = "r54-full"
 __author__ = "Alessandro De Salvo"

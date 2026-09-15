@@ -7,7 +7,20 @@ import pytest
 
 from colf_manager.app import create_app
 from colf_manager.calculations import monthly_summary, vacation_balance
-from colf_manager.models import Absence, Document, Employer, Expense, GeneratedReport, HourlyRate, Location, User, WorkEntry, Worker, db
+from colf_manager.models import (
+    Absence,
+    Document,
+    Employer,
+    Expense,
+    GeneratedReport,
+    HourlyRate,
+    Location,
+    Setting,
+    User,
+    WorkEntry,
+    Worker,
+    db,
+)
 from colf_manager.reporting import payroll_pdf
 
 
@@ -38,7 +51,11 @@ def login(client):
 
 def make_worker(app):
     with app.app_context():
-        worker = Worker(first_name="User", last_name="Example", employment_start=date(2026, 1, 1))
+        worker = Worker(
+            first_name="User",
+            last_name="Example",
+            employment_start=date(2026, 1, 1),
+        )
         db.session.add(worker)
         db.session.commit()
         return worker.id
@@ -99,9 +116,18 @@ def test_break_longer_than_shift_rejected(app, client):
 
 def test_summary_rate_history(app):
     with app.app_context():
-        rates = [HourlyRate(valid_from=date(2026, 1, 1), amount=10), HourlyRate(valid_from=date(2026, 7, 1), amount=12)]
+        rates = [
+            HourlyRate(valid_from=date(2026, 1, 1), amount=10),
+            HourlyRate(valid_from=date(2026, 7, 1), amount=12),
+        ]
         entries = [
-            WorkEntry(work_date=date(2026, 7, 3), start_time=time(9), end_time=time(13), break_minutes=0, location="Casa")
+            WorkEntry(
+                work_date=date(2026, 7, 3),
+                start_time=time(9),
+                end_time=time(13),
+                break_minutes=0,
+                location="Casa",
+            )
         ]
         s = monthly_summary(entries, [], [], rates, 2026, 7)
         assert s["worked_hours"] == Decimal("4.00")
@@ -112,10 +138,28 @@ def test_summary_rate_history(app):
 def test_expense_direction_changes_payable(app):
     with app.app_context():
         rates = [HourlyRate(valid_from=date(2026, 1, 1), amount=10)]
-        entries = [WorkEntry(work_date=date(2026, 9, 1), start_time=time(9), end_time=time(10), break_minutes=0, location="Casa")]
+        entries = [
+            WorkEntry(
+                work_date=date(2026, 9, 1),
+                start_time=time(9),
+                end_time=time(10),
+                break_minutes=0,
+                location="Casa",
+            )
+        ]
         expenses = [
-            Expense(expense_date=date(2026, 9, 2), amount=20, direction="worker_advance", description="Spesa"),
-            Expense(expense_date=date(2026, 9, 3), amount=5, direction="employer_advance", description="Anticipo"),
+            Expense(
+                expense_date=date(2026, 9, 2),
+                amount=20,
+                direction="worker_advance",
+                description="Spesa",
+            ),
+            Expense(
+                expense_date=date(2026, 9, 3),
+                amount=5,
+                direction="employer_advance",
+                description="Anticipo",
+            ),
         ]
         s = monthly_summary(entries, [], expenses, rates, 2026, 9)
         assert s["worker_advances"] == Decimal("20.00")
@@ -125,8 +169,17 @@ def test_expense_direction_changes_payable(app):
 
 def test_paid_absence_is_split_across_month_and_rate_change(app):
     with app.app_context():
-        rates = [HourlyRate(valid_from=date(2026, 9, 1), amount=10), HourlyRate(valid_from=date(2026, 10, 1), amount=12)]
-        absence = Absence(start_date=date(2026, 9, 30), end_date=date(2026, 10, 1), paid=True, paid_hours=8, kind="vacation")
+        rates = [
+            HourlyRate(valid_from=date(2026, 9, 1), amount=10),
+            HourlyRate(valid_from=date(2026, 10, 1), amount=12),
+        ]
+        absence = Absence(
+            start_date=date(2026, 9, 30),
+            end_date=date(2026, 10, 1),
+            paid=True,
+            paid_hours=8,
+            kind="vacation",
+        )
         september = monthly_summary([], [absence], [], rates, 2026, 9)
         october = monthly_summary([], [absence], [], rates, 2026, 10)
         assert september["paid_absence"] == Decimal("40.00")
@@ -148,7 +201,11 @@ def test_upload_rejects_fake_pdf(app, client):
     login(client)
     response = client.post(
         "/documents",
-        data={"worker_id": str(worker_id), "category": "contratto", "file": (BytesIO(b"not a pdf"), "x.pdf")},
+        data={
+            "worker_id": str(worker_id),
+            "category": "contratto",
+            "file": (BytesIO(b"not a pdf"), "x.pdf"),
+        },
         content_type="multipart/form-data",
     )
     assert response.status_code == 200
@@ -157,7 +214,11 @@ def test_upload_rejects_fake_pdf(app, client):
 
 def test_payroll_pdf(app):
     with app.app_context():
-        worker = Worker(first_name="User", last_name="Example", employment_start=date(2026, 1, 1))
+        worker = Worker(
+            first_name="User",
+            last_name="Example",
+            employment_start=date(2026, 1, 1),
+        )
         summary = {
             "worked_hours": Decimal("8.00"),
             "worked_pay": Decimal("80.00"),
@@ -173,7 +234,12 @@ def test_payroll_pdf(app):
         assert payroll_pdf(worker, summary, 2026, 1).read(4) == b"%PDF"
         employer = Employer(first_name="Mario", last_name="Rossi", address="Roma")
         approval = {"mode": "both", "place": "Roma", "date": date(2026, 9, 14)}
-        assert payroll_pdf(worker, summary, 2026, 1, employer=employer, approval=approval).read(4) == b"%PDF"
+        assert (
+            payroll_pdf(
+                worker, summary, 2026, 1, employer=employer, approval=approval
+            ).read(4)
+            == b"%PDF"
+        )
 
 
 def test_employer_and_worker_crud(app, client):
@@ -185,6 +251,9 @@ def test_employer_and_worker_crud(app, client):
             "last_name": "Rossi",
             "fiscal_code": "RSSMRA80A01H501U",
             "address": "Via Roma 1",
+            "city": "Roma",
+            "province": "RM",
+            "postal_code": "00100",
             "phone": "+39 061234",
             "email": "mario@example.invalid",
         },
@@ -203,6 +272,9 @@ def test_employer_and_worker_crud(app, client):
             "weekly_hours": "12",
             "hourly_rate": "10",
             "address": "Via Milano 2",
+            "city": "Roma",
+            "province": "RM",
+            "postal_code": "00100",
             "phone": "+39 067777",
             "email": "anna@example.invalid",
             "vacation_advance_allowed": "on",
@@ -214,14 +286,26 @@ def test_employer_and_worker_crud(app, client):
         worker_id = worker.id
         assert worker.employer_id == employer_id
         assert worker.email == "anna@example.invalid"
+        assert worker.city == "Roma"
+        assert worker.province == "RM"
+        assert worker.postal_code == "00100"
+        assert employer.city == "Roma"
+        assert employer.province == "RM"
+        assert employer.postal_code == "00100"
         assert worker.vacation_advance_allowed is True
     assert client.get(f"/workers/{worker_id}").status_code == 200
     assert client.post(
         f"/workers/{worker_id}/edit",
         data={
-            "first_name": "Anna", "last_name": "Bianchi",
-            "employer_id": str(employer_id), "employment_start": "2026-01-01",
-            "weekly_hours": "16", "email": "anna2@example.invalid",
+            "first_name": "Anna",
+            "last_name": "Bianchi",
+            "employer_id": str(employer_id),
+            "employment_start": "2026-01-01",
+            "weekly_hours": "16",
+            "email": "anna2@example.invalid",
+            "city": "Pomezia",
+            "province": "RM",
+            "postal_code": "00071",
         },
     ).status_code == 302
     assert client.post(
@@ -246,8 +330,12 @@ def test_vacation_projection_and_reports(app, client):
         db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=10))
         db.session.add(
             WorkEntry(
-                worker_id=worker_id, work_date=date(2026, 1, 5),
-                start_time=time(9), end_time=time(13), break_minutes=0, location="Casa"
+                worker_id=worker_id,
+                work_date=date(2026, 1, 5),
+                start_time=time(9),
+                end_time=time(13),
+                break_minutes=0,
+                location="Casa",
             )
         )
         db.session.commit()
@@ -255,7 +343,8 @@ def test_vacation_projection_and_reports(app, client):
         assert balance["projected"] == Decimal("26.00")
         assert balance["available_usable"] == Decimal("26.00")
     login(client)
-    assert client.get(f"/reports?worker_id={worker_id}&year=2026&month=1").status_code == 200
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=1")
+    assert response.status_code == 200
     urls = [
         f"/reports/payroll.pdf?worker_id={worker_id}&year=2026&month=1",
         f"/reports/annual-payroll.pdf?worker_id={worker_id}&year=2026",
@@ -274,7 +363,11 @@ def test_location_crud_and_calendar_history(app, client):
     login(client)
     response = client.post(
         "/locations",
-        data={"name": "Casa Roma", "address": "Via Roma 1", "notes": "Ingresso interno"},
+        data={
+            "name": "Casa Roma",
+            "address": "Via Roma 1",
+            "notes": "Ingresso interno",
+        },
     )
     assert response.status_code == 302
     with app.app_context():
@@ -322,7 +415,16 @@ def test_dashboard_selected_period(app, client):
     worker_id = make_worker(app)
     with app.app_context():
         db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2025, 1, 1), amount=10))
-        db.session.add(WorkEntry(worker_id=worker_id, work_date=date(2025, 3, 4), start_time=time(9), end_time=time(11), break_minutes=0, location="Casa"))
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2025, 3, 4),
+                start_time=time(9),
+                end_time=time(11),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
         db.session.commit()
     login(client)
     response = client.get("/?year=2025&month=3")
@@ -332,7 +434,9 @@ def test_dashboard_selected_period(app, client):
     assert "Tredicesima annua maturata finora".encode() in response.data
     assert "TFR annuo maturato finora".encode() in response.data
     assert "Giorni di ferie godute nel mese".encode() in response.data
-    assert "Giorni di ferie rimanenti nell'anno".encode() in response.data
+    assert "Ferie residue anno".encode() in response.data
+    assert "Attività del periodo".encode() in response.data
+    assert b"User Example" in response.data
 
 
 def test_document_manual_delete(app, client):
@@ -340,7 +444,11 @@ def test_document_manual_delete(app, client):
     login(client)
     response = client.post(
         "/documents",
-        data={"worker_id": str(worker_id), "category": "altro", "file": (BytesIO(b"%PDF-1.4\n%%EOF"), "delete-me.pdf")},
+        data={
+            "worker_id": str(worker_id),
+            "category": "altro",
+            "file": (BytesIO(b"%PDF-1.4\n%%EOF"), "delete-me.pdf"),
+        },
         content_type="multipart/form-data",
     )
     assert response.status_code == 302
@@ -356,7 +464,16 @@ def test_generated_report_is_archived(app, client):
     worker_id = make_worker(app)
     with app.app_context():
         db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=10))
-        db.session.add(WorkEntry(worker_id=worker_id, work_date=date(2026, 1, 5), start_time=time(9), end_time=time(10), break_minutes=0, location="Casa"))
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 1, 5),
+                start_time=time(9),
+                end_time=time(10),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
         db.session.commit()
     login(client)
     response = client.get(f"/reports/payroll.pdf?worker_id={worker_id}&year=2026&month=1")
@@ -382,7 +499,12 @@ def test_rate_history_edit_and_delete(app, client):
     assert client.get("/rates").status_code == 200
     assert client.post(
         f"/rates/{rate_id}/edit",
-        data={"worker_id": worker_id, "valid_from": "2026-01-01", "amount": "12.25", "notes": "Aggiornata"},
+        data={
+            "worker_id": worker_id,
+            "valid_from": "2026-01-01",
+            "amount": "12.25",
+            "notes": "Aggiornata",
+        },
     ).status_code == 302
     with app.app_context():
         assert db.session.get(HourlyRate, rate_id).amount == Decimal("12.25")
@@ -427,7 +549,11 @@ def test_expense_edit_delete_and_monthly_report(app, client):
 def test_calendar_work_edit_delete_and_recent_patterns(app, client):
     login(client)
     employer = Employer(first_name="Mario", last_name="Datore")
-    worker = Worker(first_name="Anna", last_name="Lavoratore", employment_start=date(2026, 1, 1))
+    worker = Worker(
+        first_name="Anna",
+        last_name="Lavoratore",
+        employment_start=date(2026, 1, 1),
+    )
     location = Location(name="Casa")
     with app.app_context():
         db.session.add_all([employer, worker, location])
@@ -550,11 +676,18 @@ def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):
     assert work.status_code == 201
 
     events = client.get("/api/events").json
-    vacation_events = [e for e in events if e["extendedProps"].get("absence_id") == absence_id]
+    vacation_events = [
+        event
+        for event in events
+        if event["extendedProps"].get("absence_id") == absence_id
+    ]
     assert len(vacation_events) == 2
     assert {e["start"][:10] for e in vacation_events} == {"2026-09-14", "2026-09-15"}
     assert all(e["extendedProps"]["entry_kind"] == "vacation" for e in vacation_events)
-    assert any(e["id"].startswith("work-") and e["start"].startswith("2026-09-14T14:00") for e in events)
+    assert any(
+        e["id"].startswith("work-") and e["start"].startswith("2026-09-14T14:00")
+        for e in events
+    )
 
     detail = client.get(f"/api/absence/{absence_id}")
     assert detail.status_code == 200
@@ -575,7 +708,11 @@ def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):
     )
     assert updated.status_code == 200
     events = client.get("/api/events").json
-    sickness_events = [e for e in events if e["extendedProps"].get("absence_id") == absence_id]
+    sickness_events = [
+        event
+        for event in events
+        if event["extendedProps"].get("absence_id") == absence_id
+    ]
     assert len(sickness_events) == 1
     assert sickness_events[0]["extendedProps"]["entry_kind"] == "sickness"
     assert sickness_events[0]["start"].startswith("2026-09-16T08:00")
@@ -584,3 +721,106 @@ def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):
     with app.app_context():
         assert Absence.query.count() == 0
         assert WorkEntry.query.count() == 1
+
+
+def test_reports_default_signature_place_is_employer_city(app, client):
+    with app.app_context():
+        employer = Employer(first_name="Mario", last_name="Rossi", city="Roma")
+        db.session.add(employer)
+        db.session.flush()
+        worker = Worker(
+            first_name="Anna",
+            last_name="Bianchi",
+            employer_id=employer.id,
+            employment_start=date(2026, 1, 1),
+        )
+        db.session.add(worker)
+        db.session.commit()
+        worker_id = worker.id
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=9")
+    assert response.status_code == 200
+    assert b'name="signature_place" value="Roma"' in response.data
+
+
+def test_calendar_subscription_uses_external_url(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    response = client.post(
+        "/settings",
+        data={
+            "action": "save_settings",
+            "calendar_recent_limit": "10",
+            "external_url": "https://colf.example.test/base",
+            "smtp_port": "587",
+            "smtp_security": "starttls",
+        },
+    )
+    assert response.status_code == 302
+    response = client.post(
+        "/settings",
+        data={"action": "calendar_select", "calendar_target": f"worker:{worker_id}"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"https://colf.example.test/base/calendar-subscriptions/worker/" in response.data
+    assert b"https://colf.example.test/base/caldav/worker/" in response.data
+
+
+def test_calendar_subscription_ics_contains_work_and_absence(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 9, 15),
+                start_time=time(9),
+                end_time=time(12),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
+        db.session.add(
+            Absence(
+                worker_id=worker_id,
+                start_date=date(2026, 9, 16),
+                end_date=date(2026, 9, 16),
+                start_time=time(9),
+                end_time=time(13),
+                kind="vacation",
+                paid=True,
+                paid_hours=4,
+            )
+        )
+        db.session.commit()
+    login(client)
+    client.post(
+        "/settings",
+        data={"action": "calendar_select", "calendar_target": f"worker:{worker_id}"},
+    )
+    with app.app_context():
+        setting = db.session.get(Setting, f"calendar_subscription_worker_{worker_id}")
+        token = setting.value
+    response = client.get(f"/calendar-subscriptions/worker/{worker_id}/{token}/calendar.ics")
+    assert response.status_code == 200
+    assert b"BEGIN:VCALENDAR" in response.data
+    assert b"Ore" in response.data
+    assert b"Ferie" in response.data
+    assert b"LOCATION:Casa" in response.data
+
+
+def test_password_can_be_changed_from_settings(app, client):
+    login(client)
+    response = client.post(
+        "/settings",
+        data={
+            "action": "change_password",
+            "current_password": "Test-password-123",
+            "new_password": "Another-strong-password-456",
+            "confirm_password": "Another-strong-password-456",
+        },
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        user = User.query.filter_by(username="admin").one()
+        assert user.must_change_password is False

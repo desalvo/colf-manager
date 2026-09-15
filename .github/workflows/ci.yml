@@ -53,11 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v3
-      - run: docker compose config --quiet
-        env:
-          POSTGRES_PASSWORD: validation-only
-          COLF_MANAGER_SECRET_KEY: validation-only-long-secret
-          COLF_MANAGER_ADMIN_PASSWORD: validation-only
+      - run: scripts/compose-config-check.sh
       - name: Build runtime image for validation
         uses: docker/build-push-action@v6
         with:

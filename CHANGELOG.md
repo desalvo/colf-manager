@@ -1,7 +1,12 @@
-# r68-full
+# Changelog
 
-- Ripristinata nell’overview la dicitura richiesta `TFR annuo maturato finora`.
-- Stabilizzati rispetto a `ruff format --check` i moduli normativi/migrazione già validati, tramite direttiva standard `# fmt: off`, senza modifiche funzionali.
+## r69-full - legacy schema bootstrap repair
+
+- Fixed the startup compatibility shim so missing `work_entry.entry_kind`, `paid`, and `rate_override` columns are actually created and committed on existing databases.
+- Added the `ix_work_entry_entry_kind` compatibility index and refreshed schema inspection before absence upgrades.
+- Normalized legacy `health` absence rows to day-based `sickness` during startup compatibility repair.
+- Added a regression test that boots against a legacy `work_entry` table and verifies automatic schema repair.
+- Bundled the Alembic `migrations/` directory inside the Docker runtime image for operational database commands.
 
 ## r67 - dashboard label and formatter cleanup
 
@@ -260,6 +265,6 @@
 - Vacation remains a day-based entitlement and is exposed only in days.
 - Added migration 1009 and updated calendar, summaries, payroll reports and tests.
 
-## r68-full
+## r69-full
 - Fixed production gate version/build validation: application version is checked against __version__, build revision against __build__.
 - Added explicit diagnostics for future version/build mismatches.

@@ -348,13 +348,34 @@ def _ensure_legacy_schema_compatibility():
     inspector = inspect(db.engine)
     if "work_entry" in inspector.get_table_names():
         columns = {c["name"] for c in inspector.get_columns("work_entry")}
+        statements = []
         if "entry_kind" not in columns:
-            statements.append("ALTER TABLE work_entry ADD COLUMN entry_kind VARCHAR(20) NOT NULL DEFAULT 'ordinary'")
+            statements.append(
+                "ALTER TABLE work_entry ADD COLUMN entry_kind "
+                "VARCHAR(20) NOT NULL DEFAULT 'ordinary'"
+            )
         if "paid" not in columns:
-            statements.append("ALTER TABLE work_entry ADD COLUMN paid BOOLEAN NOT NULL DEFAULT TRUE")
+            statements.append(
+                "ALTER TABLE work_entry ADD COLUMN paid BOOLEAN NOT NULL DEFAULT TRUE"
+            )
         if "rate_override" not in columns:
             statements.append("ALTER TABLE work_entry ADD COLUMN rate_override NUMERIC(10,2)")
+        for statement in statements:
+            db.session.execute(text(statement))
+        if statements:
+            db.session.commit()
+        try:
+            db.session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_work_entry_entry_kind "
+                    "ON work_entry(entry_kind)"
+                )
+            )
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
 
+    inspector = inspect(db.engine)
     if "absence" in inspector.get_table_names():
         columns = {c["name"] for c in inspector.get_columns("absence")}
         statements = []
@@ -372,6 +393,11 @@ def _ensure_legacy_schema_compatibility():
             db.session.execute(text(statement))
         if statements:
             db.session.commit()
+        db.session.execute(text("UPDATE absence SET kind='sickness' WHERE kind='health'"))
+        db.session.execute(
+            text("UPDATE absence SET start_time=NULL, end_time=NULL WHERE kind='sickness'")
+        )
+        db.session.commit()
 
     try:
         db.session.execute(

@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r68-full
+# colf-manager 1.0.0 · build r69-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 

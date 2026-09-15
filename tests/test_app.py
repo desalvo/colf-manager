@@ -1043,3 +1043,44 @@ def test_expense_installments_by_amount_create_final_remainder(app, client):
     with app.app_context():
         amounts = [Decimal(x.amount) for x in ExpenseRecoveryAllocation.query.order_by(ExpenseRecoveryAllocation.due_month)]
         assert amounts == [Decimal("50.00"), Decimal("50.00"), Decimal("25.00")]
+
+
+def test_legacy_work_entry_schema_is_upgraded_on_startup(tmp_path, monkeypatch):
+    import sqlite3
+    from sqlalchemy import inspect as sa_inspect
+
+    database = tmp_path / "legacy.db"
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE work_entry (
+                id INTEGER PRIMARY KEY,
+                worker_id INTEGER,
+                work_date DATE,
+                start_time TIME,
+                end_time TIME,
+                break_minutes INTEGER NOT NULL DEFAULT 0,
+                location VARCHAR(200)
+            )
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{database}")
+    legacy_app = create_app(
+        {
+            "TESTING": True,
+            "WTF_CSRF_ENABLED": False,
+            "UPLOAD_FOLDER": str(tmp_path / "documents-legacy"),
+            "REPORT_FOLDER": str(tmp_path / "reports-legacy"),
+            "SESSION_COOKIE_SECURE": False,
+            "TEST_ADMIN_PASSWORD": "Test-password-123",
+        }
+    )
+
+    with legacy_app.app_context():
+        columns = {column["name"] for column in sa_inspect(db.engine).get_columns("work_entry")}
+        assert {"entry_kind", "paid", "rate_override", "location_id"} <= columns

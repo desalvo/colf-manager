@@ -29,6 +29,7 @@ RUN groupadd --gid 10001 colf-manager \
 WORKDIR /app
 
 COPY --from=build /wheels /wheels
+COPY migrations /app/migrations
 
 # Install only application/runtime dependencies. Do not add packaging-only
 # libraries to the runtime image.

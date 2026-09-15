@@ -3,6 +3,8 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
+from .sickness_rules import sickness_rule
+
 CENT = Decimal("0.01")
 VACATION_DAYS_YEAR = Decimal("26")
 MONTHS_YEAR = Decimal("12")
@@ -126,7 +128,53 @@ def _paid_absence_value(absence, rates, period_start, period_end):
         return Decimal("0")
     total_days = (absence.end_date - absence.start_date).days + 1
     hours_per_day = Decimal(absence.paid_hours) / Decimal(total_days)
-    return sum((hours_per_day * rate_on(rates, day) for day in _days(overlap_start, overlap_end)), Decimal("0"))
+    if getattr(absence, "kind", None) in {"sickness", "health"}:
+        total = Decimal("0")
+        for day in _days(overlap_start, overlap_end):
+            event_day = (day - absence.start_date).days + 1
+            factor = Decimal("0.50") if event_day <= 3 else Decimal("1.00")
+            total += hours_per_day * rate_on(rates, day) * factor
+        return total
+    return sum(
+        (hours_per_day * rate_on(rates, day) for day in _days(overlap_start, overlap_end)),
+        Decimal("0"),
+    )
+
+
+def _paid_absence_total(absences, rates, period_start, period_end, worker=None):
+    if worker is None:
+        return sum(
+            (_paid_absence_value(a, rates, period_start, period_end) for a in absences),
+            Decimal("0"),
+        )
+    total = Decimal("0")
+    sickness_used_by_year = {}
+    ordered = sorted(absences, key=lambda a: (a.start_date, a.end_date, getattr(a, "id", 0) or 0))
+    for absence in ordered:
+        if not getattr(absence, "paid", False):
+            continue
+        if getattr(absence, "kind", None) not in {"sickness", "health"}:
+            total += _paid_absence_value(absence, rates, period_start, period_end)
+            continue
+        total_days = (absence.end_date - absence.start_date).days + 1
+        if total_days <= 0 or not getattr(absence, "paid_hours", None):
+            continue
+        hours_per_day = Decimal(absence.paid_hours) / Decimal(total_days)
+        for day in _days(absence.start_date, absence.end_date):
+            year = day.year
+            rule = sickness_rule(worker, absence.start_date, getattr(absence, "oncological", False))
+            legal_limit = rule.get("paid_days_limit") if rule.get("known") else None
+            used = sickness_used_by_year.get(year, Decimal("0"))
+            inside_legal = legal_limit is None or used < legal_limit
+            payable = inside_legal or bool(getattr(absence, "paid_beyond_legal_limit", False))
+            if inside_legal:
+                sickness_used_by_year[year] = used + Decimal("1")
+            if not payable or not (period_start <= day <= period_end):
+                continue
+            event_day = (day - absence.start_date).days + 1
+            factor = Decimal("0.50") if event_day <= 3 else Decimal("1.00")
+            total += hours_per_day * rate_on(rates, day) * factor
+    return total
 
 
 def _expense_due_for_period(expense, period_start, period_end):
@@ -166,15 +214,37 @@ def _expense_due_for_period(expense, period_start, period_end):
     return min(current_planned, remaining_before_current)
 
 
-def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=TFR_DIVISOR):
+def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=TFR_DIVISOR, worker=None):
     period_start, period_end = period_bounds(year, month)
     entries = [e for e in entries if period_start <= e.work_date <= period_end]
     worked_hours = sum((e.hours for e in entries), Decimal("0"))
-    worked_pay = sum((e.hours * rate_on(rates, e.work_date) for e in entries), Decimal("0"))
-    paid_absence = sum(
-        (_paid_absence_value(a, rates, period_start, period_end) for a in absences),
+    ordinary_hours = sum(
+        (e.hours for e in entries if (getattr(e, "entry_kind", None) or "ordinary") == "ordinary"),
         Decimal("0"),
     )
+    overtime_hours = sum(
+        (e.hours for e in entries if (getattr(e, "entry_kind", None) or "ordinary") == "overtime"),
+        Decimal("0"),
+    )
+    paid_work_hours = sum(
+        (e.hours for e in entries if getattr(e, "paid", None) is not False), Decimal("0")
+    )
+    unpaid_work_hours = worked_hours - paid_work_hours
+    worked_pay = sum(
+        (
+            e.hours
+            * (
+                Decimal(e.rate_override)
+                if (getattr(e, "entry_kind", None) or "ordinary") == "overtime"
+                and getattr(e, "rate_override", None) is not None
+                else rate_on(rates, e.work_date)
+            )
+            for e in entries
+            if getattr(e, "paid", None) is not False
+        ),
+        Decimal("0"),
+    )
+    paid_absence = _paid_absence_total(absences, rates, period_start, period_end, worker)
 
     worker_advances = sum(
         (
@@ -199,6 +269,10 @@ def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=
     tfr_accrual = money(tfr_useful / Decimal(tfr_factor)) if tfr_factor else Decimal("0")
     return {
         "worked_hours": money(worked_hours),
+        "ordinary_hours": money(ordinary_hours),
+        "overtime_hours": money(overtime_hours),
+        "paid_work_hours": money(paid_work_hours),
+        "unpaid_work_hours": money(unpaid_work_hours),
         "worked_pay": money(worked_pay),
         "paid_absence": money(paid_absence),
         "worker_advances": money(worker_advances),
@@ -212,9 +286,9 @@ def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=
     }
 
 
-def annual_summary(entries, absences, expenses, rates, year, tfr_factor=TFR_DIVISOR):
-    months = [monthly_summary(entries, absences, expenses, rates, year, m, tfr_factor) for m in range(1, 13)]
-    keys = ["worked_hours", "worked_pay", "paid_absence", "worker_advances", "employer_advances", "reimbursements", "gross", "payable"]
+def annual_summary(entries, absences, expenses, rates, year, tfr_factor=TFR_DIVISOR, worker=None):
+    months = [monthly_summary(entries, absences, expenses, rates, year, m, tfr_factor, worker) for m in range(1, 13)]
+    keys = ["worked_hours", "ordinary_hours", "overtime_hours", "paid_work_hours", "unpaid_work_hours", "worked_pay", "paid_absence", "worker_advances", "employer_advances", "reimbursements", "gross", "payable"]
     total = {k: money(sum((m[k] for m in months), Decimal("0"))) for k in keys}
     total["thirteenth_accrual"] = money(total["gross"] / Decimal("12"))
     total["tfr_useful_compensation"] = money(total["gross"] + total["thirteenth_accrual"])
@@ -228,7 +302,7 @@ def tfr_year_summary(worker, entries, absences, expenses, rates, year, as_of=Non
     filtered_entries = [e for e in entries if e.work_date <= cutoff]
     filtered_absences = [a for a in absences if a.start_date <= cutoff]
     filtered_expenses = [e for e in expenses if e.expense_date <= cutoff]
-    annual = annual_summary(filtered_entries, filtered_absences, filtered_expenses, rates, year, tfr_factor)
+    annual = annual_summary(filtered_entries, filtered_absences, filtered_expenses, rates, year, tfr_factor, worker)
     return {**annual, "cutoff": cutoff, "rule": "retribuzione utile annua / 13,5", "revaluation_note": "La quota maturata nell'anno non viene rivalutata. Le quote degli anni precedenti rimaste accantonate richiedono rivalutazione: 1,5% fisso + 75% dell'incremento FOI ISTAT dicembre/dicembre."}
 
 
@@ -255,7 +329,7 @@ def thirteenth_year_summary(worker, entries, absences, expenses, rates, year, as
     e = [x for x in entries if x.work_date <= cutoff]
     a = [x for x in absences if x.start_date <= cutoff]
     x = [x for x in expenses if x.expense_date <= cutoff]
-    annual = annual_summary(e, a, x, rates, year)
+    annual = annual_summary(e, a, x, rates, year, worker=worker)
     return {
         "cutoff": cutoff,
         "gross": annual["gross"],
@@ -340,19 +414,19 @@ def estimated_irpef_summary(worker, annual, year):
 def combined_thirteenth_tfr_summary(worker, entries, absences, expenses, rates, year, as_of=None, tfr_factor=TFR_DIVISOR):
     th = thirteenth_year_summary(worker, entries, absences, expenses, rates, year, as_of)
     tfr = tfr_year_summary(worker, entries, absences, expenses, rates, year, as_of, tfr_factor)
-    annual = annual_summary([e for e in entries if e.work_date <= th["cutoff"]], [a for a in absences if a.start_date <= th["cutoff"]], [x for x in expenses if x.expense_date <= th["cutoff"]], rates, year, tfr_factor)
+    annual = annual_summary([e for e in entries if e.work_date <= th["cutoff"]], [a for a in absences if a.start_date <= th["cutoff"]], [x for x in expenses if x.expense_date <= th["cutoff"]], rates, year, tfr_factor, worker)
     inps = inps_contribution_summary(worker, annual, year)
     taxes = estimated_irpef_summary(worker, annual, year) if worker.inps_number and worker.contract_number else None
     return {"cutoff": th["cutoff"], "thirteenth": th, "tfr": tfr, "annual": annual, "inps": inps, "taxes": taxes}
 
-# Domestic-work sickness rules verified against the Italian domestic-work CCNL.
-# The paid-sickness entitlement is expressed by the CCNL in calendar days;
+# Domestic-work health/sickness rules verified against the Italian domestic-work CCNL.
+# The paid-health entitlement is expressed by the CCNL in calendar days;
 # the UI converts the remaining entitlement to hours using weekly_hours / 6.
 # The 8/10/15-day thresholds have remained unchanged in the verified CCNL texts
 # from 2001 through the agreement currently effective until 2028-10-31.
 SICKNESS_RULES_VERIFIED_FROM = date(2001, 3, 8)
 SICKNESS_RULES_VERIFIED_TO = date(2028, 10, 31)
-SICKNESS_RULE_SOURCE = "CCNL lavoro domestico – malattia: 8/10/15 giorni retribuiti annui secondo anzianità"
+HEALTH_RULE_SOURCE = "CCNL lavoro domestico – malattia: 8/10/15 giorni retribuiti annui secondo anzianità"
 
 
 def _add_months(day, months):
@@ -367,8 +441,8 @@ def _add_years(day, years):
     return date(target_year, day.month, min(day.day, monthrange(target_year, day.month)[1]))
 
 
-def sickness_paid_days_limit(worker, as_of):
-    """Return the CCNL paid-sickness day ceiling applicable at *as_of*.
+def health_paid_days_limit(worker, as_of):
+    """Return the CCNL paid-health day ceiling applicable at *as_of*.
 
     Returns None when the selected date is outside the period for which this
     package has a verified contractual rule table.  The threshold is 8 days
@@ -386,8 +460,8 @@ def sickness_paid_days_limit(worker, as_of):
     return Decimal("15")
 
 
-def sickness_contract_hours_per_day(worker):
-    """Convert one CCNL sickness day to hours for dashboard display.
+def health_contract_hours_per_day(worker):
+    """Convert one CCNL health day to hours for dashboard display.
 
     Domestic-work contractual daily values use a six-day reference week; this
     is therefore a display conversion of a day-based entitlement, not a new
@@ -406,18 +480,18 @@ def _absence_interval_hours(absence, worker=None):
         )
         return max(Decimal("0"), seconds / Decimal(3600))
     if worker is not None:
-        daily = sickness_contract_hours_per_day(worker)
+        daily = health_contract_hours_per_day(worker)
         if daily:
             return daily
     return Decimal("8")
 
 
-def sickness_hours_for_period(worker, absences, period_start, period_end):
-    """Return recorded paid/unpaid sickness hours overlapping a period."""
+def health_hours_for_period(worker, absences, period_start, period_end):
+    """Return recorded paid/unpaid health hours overlapping a period."""
     paid = Decimal("0")
     unpaid = Decimal("0")
     for absence in absences:
-        if absence.kind != "sickness":
+        if absence.kind not in {"health", "sickness"}:
             continue
         overlap_start = max(absence.start_date, period_start)
         overlap_end = min(absence.end_date, period_end)
@@ -438,18 +512,18 @@ def sickness_hours_for_period(worker, absences, period_start, period_end):
     }
 
 
-def sickness_year_entitlement(worker, absences, year, as_of=None):
-    """Return paid-sickness usage and remaining entitlement for a selected year.
+def health_year_entitlement(worker, absences, year, as_of=None):
+    """Return paid-health usage and remaining entitlement for a selected year.
 
     The CCNL ceiling is day-based.  ``limit_hours`` and ``remaining_hours`` are
     dashboard conversions using weekly_hours / 6 so the user can compare the
-    entitlement with hour-based sickness records.
+    entitlement with hour-based health records.
     """
     year_start = date(year, 1, 1)
     year_end = date(year, 12, 31)
     cutoff = min(as_of or year_end, year_end)
-    limit_days = sickness_paid_days_limit(worker, cutoff)
-    used = sickness_hours_for_period(worker, absences, year_start, cutoff)["paid_hours"]
+    limit_days = health_paid_days_limit(worker, cutoff)
+    used = health_hours_for_period(worker, absences, year_start, cutoff)["paid_hours"]
     if limit_days is None:
         return {
             "known": False,
@@ -458,9 +532,9 @@ def sickness_year_entitlement(worker, absences, year, as_of=None):
             "limit_hours": None,
             "used_paid_hours": used,
             "remaining_hours": None,
-            "source": SICKNESS_RULE_SOURCE,
+            "source": HEALTH_RULE_SOURCE,
         }
-    daily_hours = sickness_contract_hours_per_day(worker)
+    daily_hours = health_contract_hours_per_day(worker)
     limit_hours = money(limit_days * daily_hours)
     return {
         "known": True,
@@ -469,5 +543,12 @@ def sickness_year_entitlement(worker, absences, year, as_of=None):
         "limit_hours": limit_hours,
         "used_paid_hours": used,
         "remaining_hours": money(max(Decimal("0"), limit_hours - used)),
-        "source": SICKNESS_RULE_SOURCE,
+        "source": HEALTH_RULE_SOURCE,
     }
+
+
+# Backward-compatible Python aliases for integrations using pre-r60 names.
+sickness_paid_days_limit = health_paid_days_limit
+sickness_contract_hours_per_day = health_contract_hours_per_day
+sickness_hours_for_period = health_hours_for_period
+sickness_year_entitlement = health_year_entitlement

@@ -1,69 +1,71 @@
-{% extends 'base.html' %}
-{% block content %}
-<section class="hero">
-  <div>
-    <span class="eyebrow">Periodo {{ '%02d'|format(selected_month) }}/{{ selected_year }}</span>
-    <h1>Il lavoro di casa,<br><em>semplicemente organizzato.</em></h1>
-    <p>Ore, assenze, rimborsi e documenti in un unico spazio riservato.</p>
-    <div class="hero-actions"><a class="button" href="/calendar">Aggiungi ore</a></div>
-  </div>
-  <div class="hero-photo"><span>Una gestione più serena</span></div>
-</section>
+{% extends 'base.html' %}{% block content %}
+{% macro metric(icon, label, value, unit='', limit=None, mode='usage', note='') -%}
+  {% set status = '' %}
+  {% if limit is not none and limit|float > 0 %}
+    {% if mode == 'remaining' %}{% set ratio = 1 - ((value|float) / (limit|float)) %}{% else %}{% set ratio = (value|float) / (limit|float) %}{% endif %}
+    {% if ratio >= 0.9 %}{% set status='metric-danger' %}{% elif ratio >= 0.7 %}{% set status='metric-warning' %}{% else %}{% set status='metric-safe' %}{% endif %}
+  {% endif %}
+  <article class="metric-card {{status}}">
+    <span class="metric-icon" aria-hidden="true">{{icon}}</span>
+    <span class="metric-label">{{label}}</span>
+    <strong>{{value}}</strong>{% if unit %}<small>{{unit}}</small>{% endif %}
+    {% if limit is not none %}<div class="metric-limit" title="Limite di riferimento">limite {{limit}} {{unit}}</div>{% endif %}
+    {% if note %}<small>{{note}}</small>{% endif %}
+  </article>
+{%- endmacro %}
+<div class="page-title"><span class="eyebrow">Overview · {{'%02d'|format(selected_month)}}/{{selected_year}}</span><h1>Riepilogo operativo</h1><p>Indicatori del periodo {{'%02d'|format(selected_month)}}/{{selected_year}}, ferie, malattia e permessi contrattuali.</p></div>
+<section class="card dashboard-period-card"><form method="get" class="inline dashboard-period-form"><label>Anno<input type="number" name="year" min="1990" max="2200" value="{{selected_year}}"></label><label>Mese<select name="month">{% for m in range(1,13) %}<option value="{{m}}" {% if m==selected_month %}selected{% endif %}>{{'%02d'|format(m)}}</option>{% endfor %}</select></label><button>Aggiorna</button></form></section>
 
-<section class="card dashboard-period-card">
-  <form method="get" class="inline dashboard-period-form">
-    <label>Mese<input type="number" name="month" min="1" max="12" value="{{selected_month}}"></label>
-    <label>Anno<input type="number" name="year" min="1990" max="2200" value="{{selected_year}}"></label>
-    <button>Mostra periodo</button>
-    <a class="button secondary" href="/">Mese corrente</a>
-  </form>
-</section>
-
-<section class="dashboard-metrics" aria-label="Indicatori del periodo">
-  <article class="metric-card"><span class="metric-label">Ore del mese</span><strong>{{ '%.2f'|format(stats.hours) }}</strong></article>
-  <article class="metric-card"><span class="metric-label">Da corrispondere</span><strong>€ {{ '%.2f'|format(stats.pay) }}</strong></article>
-  <article class="metric-card"><span class="metric-label">TFR maturato nel mese</span><strong>€ {{ '%.2f'|format(stats.tfr) }}</strong></article>
-  <article class="metric-card"><span class="metric-label">Lavoratori</span><strong>{{ stats.workers }}</strong></article>
-  <article class="metric-card"><span class="metric-label">Tredicesima maturata nel mese</span><strong>€ {{ '%.2f'|format(stats.thirteenth_month) }}</strong></article>
-  <article class="metric-card"><span class="metric-label">Tredicesima annua maturata finora</span><strong>€ {{ '%.2f'|format(stats.thirteenth_ytd) }}</strong></article>
-  <article class="metric-card"><span class="metric-label">TFR annuo maturato finora</span><strong>€ {{ '%.2f'|format(stats.tfr_ytd) }}</strong></article>
-  <article class="metric-card"><span class="metric-label">Giorni di ferie godute nel mese</span><strong>{{ '%.2f'|format(stats.vacation_used_month) }}</strong><small>giorni</small></article>
-  <article class="metric-card"><span class="metric-label">Ferie residue anno</span><strong>{{ '%.2f'|format(stats.vacation_remaining_year) }}</strong><small>giorni</small></article>
-  <article class="metric-card"><span class="metric-label">Malattia retribuita</span><strong>{{ '%.2f'|format(stats.sickness_paid_month) }}</strong><small>ore mese</small></article>
-  <article class="metric-card"><span class="metric-label">Malattia non retribuita</span><strong>{{ '%.2f'|format(stats.sickness_unpaid_month) }}</strong><small>ore mese</small></article>
-  <article class="metric-card"><span class="metric-label">Malattia retribuibile residua</span><strong>{% if stats.sickness_rule_known %}{{ '%.2f'|format(stats.sickness_paid_remaining_year) }}{% else %}N/D{% endif %}</strong><small>ore anno</small></article>
-</section>
-
-<section class="card legal-note dashboard-legal-note">
-  <small><b>Malattia:</b> il CCNL esprime il massimale retribuito in giorni (8/10/15 in base all'anzianità). Il residuo in ore è una conversione basata sull'orario settimanale ÷ 6. Per date fuori dal periodo contrattuale verificato il valore è indicato come N/D.</small>
-</section>
-
-<details class="card collapsible-card dashboard-activity">
-  <summary>
-    <span><b>Attività del periodo</b><small>Ultime registrazioni del mese selezionato</small></span>
-    <span class="summary-chevron" aria-hidden="true">⌄</span>
-  </summary>
-  <div class="collapsible-content">
-    <div class="card-title"><span></span><a href="/calendar">Apri calendario →</a></div>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>Data</th><th>Lavoratore</th><th>Orario</th><th>Luogo</th><th>Ore</th></tr></thead>
-        <tbody>
-          {% for e in recent %}
-          {% set worker = worker_map.get(e.worker_id) %}
-          <tr>
-            <td>{{e.work_date}}</td>
-            <td>{% if worker %}{{worker.first_name}} {{worker.last_name}}{% else %}—{% endif %}</td>
-            <td>{{e.start_time.strftime('%H:%M')}}–{{e.end_time.strftime('%H:%M')}}</td>
-            <td>{{e.location}}</td>
-            <td>{{e.hours}}</td>
-          </tr>
-          {% else %}
-          <tr><td colspan="5">Nessuna ora registrata nel periodo selezionato.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+<details class="card collapsible-card">
+  <summary><span><b>Ore e retribuzione</b><small>Indicatori economici del mese selezionato</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="collapsible-content dashboard-metrics">
+    {{metric('⏱️','Ore totali','%.2f'|format(stats.hours),'h')}}
+    {{metric('🕘','Ore ordinarie','%.2f'|format(stats.ordinary_hours),'h')}}
+    {{metric('⚡','Ore straordinarie','%.2f'|format(stats.overtime_hours),'h')}}
+    {{metric('○','Ore lavoro non retribuite','%.2f'|format(stats.unpaid_work_hours),'h')}}
+    {{metric('💶','Da corrispondere','€ %.2f'|format(stats.pay))}}
+    {{metric('🏦','TFR mese','€ %.2f'|format(stats.tfr))}}
+    {{metric('🎁','Tredicesima maturata nel mese','€ %.2f'|format(stats.thirteenth_month))}}
+    {{metric('📅','Tredicesima annua maturata finora','€ %.2f'|format(stats.thirteenth_ytd))}}
+    {{metric('📈','TFR annuo maturato finora','€ %.2f'|format(stats.tfr_ytd))}}
+    {{metric('👤','Lavoratori',stats.workers)}}
   </div>
 </details>
+
+<details class="card collapsible-card">
+  <summary><span><b>Ferie e malattia</b><small>Entrambe espresse in giorni; la malattia segue i limiti contrattuali del periodo</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="collapsible-content dashboard-metrics">
+    {{metric('🏖️','Giorni di ferie godute nel mese','%.2f'|format(stats.vacation_used_month),'giorni')}}
+    {{metric('🌴','Ferie residue anno','%.2f'|format(stats.vacation_remaining_year),'giorni',stats.vacation_annual_limit,'remaining')}}
+    {{metric('🤒','Malattia retribuita nel mese','%.2f'|format(stats.sickness_paid_month),'giorni')}}
+    {{metric('🩹','Malattia non retribuita nel mese','%.2f'|format(stats.sickness_unpaid_month),'giorni')}}
+    {{metric('📆','Malattia retribuita nell\'anno','%.2f'|format(stats.sickness_paid_year),'giorni',stats.sickness_paid_limit)}}
+    {{metric('🚫','Malattia non retribuita nell\'anno','%.2f'|format(stats.sickness_unpaid_year),'giorni')}}
+    {{metric('🤝','Malattia pagata oltre limite','%.2f'|format(stats.sickness_extra_paid_year),'giorni',None,'usage','trattamento di miglior favore')}}
+    {% if stats.sickness_rule_known %}
+      {{metric('🛡️','Malattia retribuibile residua','%.2f'|format(stats.sickness_paid_remaining_year),'giorni',stats.sickness_paid_limit,'remaining')}}
+      {{metric('🏠','Conservazione posto utilizzata (365 gg)','%.2f'|format(stats.sickness_job_protection_used),'giorni',stats.sickness_job_protection_days)}}
+      {{metric('🛡️','Conservazione posto residua (365 gg)','%.2f'|format(stats.sickness_job_protection_remaining),'giorni',stats.sickness_job_protection_days,'remaining')}}
+    {% else %}
+      {{metric('❓','Malattia retribuibile residua','N/D','','','','regola storica non codificata')}}
+    {% endif %}
+  </div>
+</details>
+
+<details class="card collapsible-card">
+  <summary><span><b>Permessi retribuiti e non retribuiti</b><small>Utilizzo, eventuale miglior favore e monte disponibile per categoria</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary>
+  <div class="collapsible-content">
+    <div class="table-scroll"><table class="indicator-table"><thead><tr><th>🏷️ Categoria</th><th>✅ Retr. mese</th><th>📅 Retr. anno</th><th>🤝 Miglior favore</th><th>○ Non retr. mese</th><th>🚫 Non retr. anno</th><th>📈 Maturato</th><th>🎯 Totale anno</th><th>🟢 Residuo</th></tr></thead><tbody>
+    {% for code,p in stats.permit_categories.items() %}
+      {% set usage_class='' %}{% if not p.non_numeric_entitlement and p.annual_total > 0 %}{% set ratio=(p.annual_total-p.remaining)/p.annual_total %}{% if ratio >= 0.9 %}{% set usage_class='indicator-danger' %}{% elif ratio >= 0.7 %}{% set usage_class='indicator-warning' %}{% else %}{% set usage_class='indicator-safe' %}{% endif %}{% endif %}
+      <tr><td><b>🕒 {{p.label}}</b><br><small>{{p.basis}}</small></td><td>✅ {{'%.2f'|format(p.paid_month)}} h</td><td>📅 {{'%.2f'|format(p.paid_year)}} h</td><td>🤝 {{'%.2f'|format(p.extra_paid_year or 0)}} h</td><td>○ {{'%.2f'|format(p.unpaid_month)}} h</td><td>🚫 {{'%.2f'|format(p.unpaid_year)}} h</td><td>{% if p.non_numeric_entitlement %}ℹ️ Per evento / requisiti{% else %}📈 {{'%.2f'|format(p.accrued_to_date)}} h{% endif %}</td><td>{% if p.non_numeric_entitlement %}ℹ️ Non definito come plafond annuo{% else %}🎯 {{'%.2f'|format(p.annual_total)}} h{% endif %}</td><td class="{{usage_class}}">{% if p.non_numeric_entitlement %}—{% else %}🟢 {{'%.2f'|format(p.remaining)}} h{% endif %}</td></tr>
+    {% endfor %}
+    </tbody></table></div>
+    <p class="fineprint">Il trattamento di miglior favore del datore consente di retribuire permessi oltre il plafond contrattuale senza aumentare né falsare il diritto legale residuo: l'eccedenza resta evidenziata separatamente.</p>
+  </div>
+</details>
+
+<section class="card legal-note dashboard-legal-note"><small>La malattia è conteggiata in giorni di calendario. Il motore normativo seleziona la regola valida alla data registrata; i limiti contrattuali e gli eventuali trattamenti di miglior favore sono mantenuti separati.</small></section>
+
+<details class="card collapsible-card dashboard-activity"><summary><span><b>Attività del periodo</b><small>Ultime registrazioni del mese selezionato</small></span><span class="summary-chevron" aria-hidden="true">⌄</span></summary><div class="collapsible-content"><div class="card-title"><span></span><a href="/calendar">Apri calendario →</a></div><div class="table-scroll"><table><thead><tr><th>Data</th><th>Lavoratore</th><th>Tipo</th><th>Orario</th><th>Luogo</th><th>Ore</th><th>Retribuite</th></tr></thead><tbody>{% for e in recent %}{% set worker = worker_map.get(e.worker_id) %}<tr><td>{{e.work_date}}</td><td>{% if worker %}{{worker.first_name}} {{worker.last_name}}{% else %}—{% endif %}</td><td>{{'Straordinarie' if e.entry_kind == 'overtime' else 'Ordinarie'}}</td><td>{{e.start_time.strftime('%H:%M')}}–{{e.end_time.strftime('%H:%M')}}</td><td>{{e.location}}</td><td>{{e.hours}}</td><td>{{'Sì' if e.paid else 'No'}}</td></tr>{% else %}<tr><td colspan="7">Nessuna ora registrata nel periodo selezionato.</td></tr>{% endfor %}</tbody></table></div></div></details>
 {% endblock %}

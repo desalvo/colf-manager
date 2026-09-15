@@ -79,3 +79,26 @@ La r25 usa `postgres:18.6-alpine`. Le installazioni PostgreSQL 17 esistenti rich
 
 ### Compensazioni manuali di spese e rimborsi
 Ogni spesa crea una partita a credito del datore o del lavoratore. È possibile registrare più compensazioni parziali, anche in contanti e senza allegato, oppure con bonifico/carta/altro metodo e documento facoltativo. Il sistema mantiene importo originario, totale compensato e residuo; impedisce di compensare oltre il saldo disponibile. Il residuo può essere lasciato nel cedolino del mese della spesa, riportato integralmente a un mese successivo oppure rateizzato su più mesi indicando il numero di rate o l'importo della rata. Le compensazioni manuali restano possibili nei mesi successivi quando esiste un piano di riporto/rateizzazione e riducono le quote future ancora aperte. Le quote già confluite in un cedolino sono consolidate e non possono essere compensate una seconda volta. In questo modo una spesa da €120 compensata per €40 e poi €30 produce un residuo di €50 nel cedolino.
+
+### Tipologie di ore e ferie (r60)
+- **Ore ordinarie**: retribuite per default; possono essere marcate non retribuite.
+- **Ore straordinarie**: retribuite per default; usano la tariffa vigente oppure un override valido solo per la singola registrazione.
+- **Malattia**: dalla r62 ripristina la dicitura corretta ed è gestita esclusivamente in giorni di calendario.
+- **Ore permesso**: retribuite per default, con possibilità di marcarle non retribuite.
+- **Ferie**: sono sempre espresse e rendicontate in giorni, mai come tipologia di ore.
+
+
+### Permessi per categoria e convivenza (r61)
+- anagrafica lavoratore: convivenza, regime ridotto art. 14(2) e carica sindacale rilevante;
+- categorie CCNL per visite mediche, rinnovo permesso di soggiorno, ricongiungimento familiare, assistenza familiare con grave disabilità, lutto, nascita figlio, formazione, formazione Ebincolf e permessi sindacali;
+- categoria `Altro` disponibile per permessi non retribuiti;
+- motore di regole con decorrenza storica: CCNL previgente e CCNL 2025-2028;
+- monte comune art. 19 calcolato in base a convivenza e ore settimanali;
+- overview e report espongono utilizzo mensile/annuo, disponibilità e residui per categoria.
+
+
+### Malattia in giorni e miglior favore (r62)
+- Malattia sempre espressa in giorni di calendario, senza orari.
+- Regole contrattuali versionate per periodo con 10/45/180 giorni di conservazione del posto e 8/10/15 giorni retribuibili in base all'anzianità; primi 3 giorni al 50%, dal 4° al 100%.
+- Possibilità per il datore di retribuire volontariamente malattia e permessi oltre il limite contrattuale, con eccedenza separata.
+- Overview con icona su ogni indicatore e stato cromatico per gli indicatori soggetti a limite.

@@ -1,8 +1,8 @@
-# colf-manager 1.0.0 · build r59-full
+# colf-manager 1.0.0 · build r67-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
-Web application for a private employer to record a domestic worker's hours, workplaces, effective-dated rates, leave, sickness, employer/worker advances, expenses, TFR accrual, documents and management reports.
+Web application for a private employer to record a domestic worker's hours, workplaces, effective-dated rates, vacation, sickness/permit hours, employer/worker advances, expenses, TFR accrual, documents and management reports.
 
 ## Quick start
 
@@ -92,3 +92,26 @@ From **Settings**, administrators can configure the external application URL and
 
 ### Manual expense/reimbursement settlements
 Each expense creates a balance owed either to the employer or to the worker. Multiple partial settlements can be recorded, including cash with no attachment, or bank/card/other methods with optional evidence. The system tracks original amount, manually settled amount and remaining balance, and prevents over-settlement. The remaining balance can stay in the payroll for the expense month, be carried forward in full to a later month, or be split into installments by installment count or amount. Manual settlements remain possible in later months when a carry-forward/installment plan exists and reduce future open quotas. Quotas already included in generated payroll are locked to prevent duplicate reimbursement. For example, a EUR 120 expense settled by EUR 40 and then EUR 30 leaves EUR 50 for payroll.
+
+### Hour types and vacation (r60)
+- **Ordinary hours**: paid by default; they may be marked unpaid.
+- **Overtime hours**: paid by default; they use the effective hourly rate or a per-entry override.
+- **Sickness**: from r62 it is handled exclusively in calendar days with the restored sickness label.
+- **Permit hours**: paid by default and may be marked unpaid.
+- **Vacation**: always recorded and reported in days, never as an hour type.
+
+
+### Permit categories and live-in status (r61)
+- worker profile tracks live-in status, reduced live-in schedule under CCNL art. 14(2), and relevant union-office status;
+- CCNL permit categories cover medical visits, residence-permit renewal, family reunification, certified severe-disability family care, bereavement, childbirth for fathers, professional training, Ebincolf training and union leave;
+- `Other` is available for unpaid permits;
+- effective-dated rules distinguish the previous CCNL from the 2025-2028 CCNL;
+- art. 19 shared paid-hours bank is computed from live-in status and contractual weekly hours;
+- overview and relevant reports show monthly/yearly usage, entitlement and remaining balances.
+
+
+### Sickness days and employer-favour treatment (r62)
+- Sickness is always expressed in calendar days, without clock times.
+- Effective-dated rules encode job-protection and paid-sickness ceilings; the first three consecutive days are paid at 50%, from day four at 100%.
+- The employer may voluntarily pay sickness or permit time beyond the contractual ceiling, tracked separately from the legal entitlement.
+- Every overview indicator has an icon; limited indicators use threshold-aware visual states.

@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager full package r59: production gate =="
+echo "== colf-manager full package r67: production gate =="
 
 if [[ "${GITHUB_ACTIONS:-}" != "true" && -z "${VIRTUAL_ENV:-}" ]]; then
   echo "ERROR: activate .venv first for local execution." >&2
@@ -65,6 +65,9 @@ required = [
     Path("migrations/versions/1006_signatures_payments.py"),
     Path("migrations/versions/1007_expense_settlements.py"),
     Path("migrations/versions/1008_expense_recovery_allocations.py"),
+    Path("migrations/versions/1009_hour_types_health_permits.py"),
+    Path("migrations/versions/1010_permit_categories_live_in.py"),
+    Path("migrations/versions/1011_sickness_days_and_employer_override.py"),
     Path("SECURITY.md"),
     Path("LICENSE"),
     Path("output/pdf/colf-manager-manual-v1.0.0-it.pdf"),
@@ -100,7 +103,7 @@ if any(count < 2 for count in pages.values()):
 
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r59-full",
+    "overlay_revision": "r67-full",
     "status": "passed",
     "manual_pages": pages,
     "checks": [
@@ -128,4 +131,4 @@ Path("dist/production-evidence.json").write_text(
 )
 PY
 
-echo "Production gate r59 full passed."
+echo "Production gate r67 full passed."

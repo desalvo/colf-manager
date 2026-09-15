@@ -48,9 +48,8 @@ from .calculations import (
     inps_contribution_summary,
     estimated_irpef_summary,
     vacation_balance,
+    vacation_hours_per_day,
     vacation_working_days,
-    sickness_hours_for_period,
-    sickness_year_entitlement,
 )
 from . import __author__, __build__, __version__
 from .backup import create_full_export, restore_full_export
@@ -72,6 +71,12 @@ from .models import (
     WorkEntry,
     Worker,
     db,
+)
+from .sickness_rules import sickness_metrics, sickness_rule, sickness_days_in_period
+from .permit_rules import (
+    PERMIT_CATEGORIES,
+    permit_metrics,
+    validate_paid_permit,
 )
 from .reporting import (
     annual_payroll_pdf,
@@ -304,6 +309,9 @@ def _ensure_legacy_schema_compatibility():
             "email": "VARCHAR(255)",
             "employment_end": "DATE",
             "vacation_advance_allowed": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "live_in": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "live_in_reduced_schedule": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "union_officer": "BOOLEAN NOT NULL DEFAULT FALSE",
             "contract_number": "VARCHAR(100)",
             "contract_type": "VARCHAR(20) NOT NULL DEFAULT 'permanent'",
             "employer_covers_all_taxes": "BOOLEAN NOT NULL DEFAULT FALSE",
@@ -338,6 +346,15 @@ def _ensure_legacy_schema_compatibility():
             db.session.rollback()
 
     inspector = inspect(db.engine)
+    if "work_entry" in inspector.get_table_names():
+        columns = {c["name"] for c in inspector.get_columns("work_entry")}
+        if "entry_kind" not in columns:
+            statements.append("ALTER TABLE work_entry ADD COLUMN entry_kind VARCHAR(20) NOT NULL DEFAULT 'ordinary'")
+        if "paid" not in columns:
+            statements.append("ALTER TABLE work_entry ADD COLUMN paid BOOLEAN NOT NULL DEFAULT TRUE")
+        if "rate_override" not in columns:
+            statements.append("ALTER TABLE work_entry ADD COLUMN rate_override NUMERIC(10,2)")
+
     if "absence" in inspector.get_table_names():
         columns = {c["name"] for c in inspector.get_columns("absence")}
         statements = []
@@ -345,6 +362,12 @@ def _ensure_legacy_schema_compatibility():
             statements.append("ALTER TABLE absence ADD COLUMN start_time TIME")
         if "end_time" not in columns:
             statements.append("ALTER TABLE absence ADD COLUMN end_time TIME")
+        if "permit_category" not in columns:
+            statements.append("ALTER TABLE absence ADD COLUMN permit_category VARCHAR(40)")
+        if "paid_beyond_legal_limit" not in columns:
+            statements.append("ALTER TABLE absence ADD COLUMN paid_beyond_legal_limit BOOLEAN NOT NULL DEFAULT FALSE")
+        if "oncological" not in columns:
+            statements.append("ALTER TABLE absence ADD COLUMN oncological BOOLEAN NOT NULL DEFAULT FALSE")
         for statement in statements:
             db.session.execute(text(statement))
         if statements:
@@ -636,6 +659,9 @@ def create_app(test_config=None):
         stats = {
             "workers": len(workers),
             "hours": 0,
+            "ordinary_hours": 0,
+            "overtime_hours": 0,
+            "unpaid_work_hours": 0,
             "pay": 0,
             "tfr": 0,
             "thirteenth_month": 0,
@@ -643,17 +669,29 @@ def create_app(test_config=None):
             "tfr_ytd": 0,
             "vacation_used_month": 0,
             "vacation_remaining_year": 0,
+            "vacation_annual_limit": 0,
             "sickness_paid_month": 0,
             "sickness_unpaid_month": 0,
+            "sickness_paid_year": 0,
+            "sickness_unpaid_year": 0,
+            "sickness_extra_paid_year": 0,
+            "sickness_paid_limit": 0,
             "sickness_paid_remaining_year": 0,
+            "sickness_job_protection_days": 0,
+            "sickness_job_protection_used": 0,
+            "sickness_job_protection_remaining": 0,
             "sickness_rule_known": True,
+            "permit_categories": {},
         }
         for worker in workers:
             worker_obj, entries, absences_list, expenses_list, rates_list = _worker_data(worker.id)
             summary = monthly_summary(
-                entries, absences_list, expenses_list, rates_list, year, month, _tfr_factor()
+                entries, absences_list, expenses_list, rates_list, year, month, _tfr_factor(), worker_obj
             )
             stats["hours"] += float(summary["worked_hours"])
+            stats["ordinary_hours"] += float(summary["ordinary_hours"])
+            stats["overtime_hours"] += float(summary["overtime_hours"])
+            stats["unpaid_work_hours"] += float(summary["unpaid_work_hours"])
             stats["pay"] += float(summary["payable"])
             stats["tfr"] += float(summary["tfr_accrual"])
             stats["thirteenth_month"] += float(summary["thirteenth_accrual"])
@@ -669,6 +707,7 @@ def create_app(test_config=None):
                     year,
                     ytd_month,
                     _tfr_factor(),
+                    worker_obj,
                 )
                 ytd_thirteenth += Decimal(ytd_summary["thirteenth_accrual"])
                 ytd_tfr += Decimal(ytd_summary["tfr_accrual"])
@@ -685,26 +724,67 @@ def create_app(test_config=None):
                         vacation_working_days(overlap_start, overlap_end)
                     )
 
+            permit_cutoff = min(period_end, date.today()) if year == date.today().year and month == date.today().month else period_end
+            for metric in permit_metrics(worker_obj, absences_list, year, permit_cutoff):
+                bucket = stats["permit_categories"].setdefault(
+                    metric["category"],
+                    {
+                        "label": metric["label"],
+                        "basis": metric["basis"],
+                        "unit": metric["unit"],
+                        "paid_month": 0.0,
+                        "paid_year": 0.0,
+                        "unpaid_month": 0.0,
+                        "unpaid_year": 0.0,
+                        "extra_paid_month": 0.0,
+                        "extra_paid_year": 0.0,
+                        "accrued_to_date": 0.0,
+                        "annual_total": 0.0,
+                        "remaining": 0.0,
+                        "non_numeric_entitlement": False,
+                    },
+                )
+                bucket["paid_month"] += float(metric["paid_month"])
+                bucket["paid_year"] += float(metric["paid_year"])
+                bucket["unpaid_month"] += float(metric["unpaid_month"])
+                bucket["unpaid_year"] += float(metric["unpaid_year"])
+                bucket["extra_paid_month"] += float(metric.get("extra_paid_month", 0))
+                bucket["extra_paid_year"] += float(metric.get("extra_paid_year", 0))
+                if metric["accrued_to_date"] is None:
+                    bucket["non_numeric_entitlement"] = True
+                else:
+                    bucket["accrued_to_date"] += float(metric["accrued_to_date"])
+                if metric["annual_total"] is None:
+                    bucket["non_numeric_entitlement"] = True
+                else:
+                    annual_value = metric["annual_total"]
+                    if metric["unit"] == "days":
+                        from .permit_rules import daily_hours
+                        annual_value = annual_value * daily_hours(worker_obj)
+                    bucket["annual_total"] += float(annual_value)
+                if metric["remaining"] is not None:
+                    bucket["remaining"] += float(metric["remaining"])
+
             balance = vacation_balance(
                 worker_obj, absences_list, year, date(year, 12, 31)
             )
             stats["vacation_remaining_year"] += float(
                 balance["projected"] - balance["used_scheduled"]
             )
+            stats["vacation_annual_limit"] += float(balance["projected"])
 
-            sickness_month = sickness_hours_for_period(
-                worker_obj, absences_list, period_start, period_end
-            )
-            stats["sickness_paid_month"] += float(sickness_month["paid_hours"])
-            stats["sickness_unpaid_month"] += float(sickness_month["unpaid_hours"])
-
-            sickness_year = sickness_year_entitlement(
-                worker_obj, absences_list, year, period_end
-            )
-            if sickness_year["known"]:
-                stats["sickness_paid_remaining_year"] += float(
-                    sickness_year["remaining_hours"]
-                )
+            sickness = sickness_metrics(worker_obj, absences_list, year, period_end)
+            stats["sickness_paid_month"] += float(sickness["paid_month"])
+            stats["sickness_unpaid_month"] += float(sickness["total_month"] - sickness["paid_month"])
+            stats["sickness_paid_year"] += float(sickness["paid_year"])
+            stats["sickness_unpaid_year"] += float(sickness["total_year"] - sickness["paid_year"])
+            stats["sickness_extra_paid_year"] += float(sickness["extra_paid_year"])
+            if sickness["known"]:
+                stats["sickness_paid_limit"] += float(sickness["paid_days_limit"])
+                stats["sickness_paid_remaining_year"] += float(sickness["legal_paid_remaining"])
+                stats["sickness_job_protection_days"] += float(sickness["job_protection_days"])
+                stats["sickness_job_protection_used"] += float(sickness["job_protection_used_365"])
+                stats["sickness_job_protection_remaining"] += float(sickness["job_protection_remaining_365"])
             else:
                 stats["sickness_rule_known"] = False
         recent = (
@@ -757,6 +837,9 @@ def create_app(test_config=None):
         if worker.employment_end and worker.employment_end < worker.employment_start:
             raise ValueError("La data di fine rapporto non può precedere l'assunzione")
         worker.weekly_hours = nonnegative_decimal(request.form.get("weekly_hours"), "Ore settimanali")
+        worker.live_in = "live_in" in request.form
+        worker.live_in_reduced_schedule = worker.live_in and "live_in_reduced_schedule" in request.form
+        worker.union_officer = "union_officer" in request.form
         worker.vacation_advance_allowed = "vacation_advance_allowed" in request.form
         worker.notes = (request.form.get("notes") or "").strip() or None
         return worker
@@ -1108,7 +1191,7 @@ def create_app(test_config=None):
         recent_patterns = []
         candidates = []
         for entry in WorkEntry.query.order_by(WorkEntry.work_date.desc(), WorkEntry.start_time.desc()).limit(250).all():
-            candidates.append((entry.work_date, entry.start_time, "work", entry))
+            candidates.append((entry.work_date, entry.start_time, entry.entry_kind or "ordinary", entry))
         for absence in Absence.query.order_by(Absence.start_date.desc(), Absence.id.desc()).limit(250).all():
             candidates.append((absence.start_date, absence.start_time or time(9, 0), absence.kind, absence))
         candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
@@ -1118,16 +1201,16 @@ def create_app(test_config=None):
                 continue
             employer = db.session.get(Employer, worker.employer_id) if worker.employer_id else None
             employer_name = f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato"
-            if kind == "work":
+            if kind in {"ordinary", "overtime"}:
                 location_obj = db.session.get(Location, record.location_id) if record.location_id else None
                 if location_obj is None:
                     continue
-                key = ("work", record.worker_id, worker.employer_id, record.location_id, record.start_time, record.end_time, record.break_minutes)
+                key = (kind, record.worker_id, worker.employer_id, record.location_id, record.start_time, record.end_time, record.break_minutes, bool(record.paid), str(record.rate_override or ""))
                 start_minutes = record.start_time.hour * 60 + record.start_time.minute
                 end_minutes = record.end_time.hour * 60 + record.end_time.minute
                 recent = {
-                    "entry_kind": "work",
-                    "kind_label": "Ore retribuite",
+                    "entry_kind": kind,
+                    "kind_label": "Ore straordinarie" if kind == "overtime" else "Ore ordinarie",
                     "worker_id": worker.id,
                     "worker_name": f"{worker.first_name} {worker.last_name}",
                     "employer_name": employer_name,
@@ -1137,8 +1220,9 @@ def create_app(test_config=None):
                     "end_time": record.end_time.strftime("%H:%M"),
                     "duration_minutes": max(1, end_minutes - start_minutes),
                     "break_minutes": record.break_minutes,
-                    "paid": False,
+                    "paid": bool(record.paid),
                     "paid_hours": "",
+                    "rate_override": str(record.rate_override or ""),
                     "color": _calendar_color(worker.id, worker.employer_id, record.location_id),
                 }
             else:
@@ -1149,7 +1233,7 @@ def create_app(test_config=None):
                 end_minutes = end_clock.hour * 60 + end_clock.minute
                 recent = {
                     "entry_kind": kind,
-                    "kind_label": "Ferie" if kind == "vacation" else "Malattia" if kind == "sickness" else "Permesso non retribuito",
+                    "kind_label": "Ferie" if kind == "vacation" else "Malattia" if kind in {"health", "sickness"} else "Permesso",
                     "worker_id": worker.id,
                     "worker_name": f"{worker.first_name} {worker.last_name}",
                     "employer_name": employer_name,
@@ -1161,7 +1245,8 @@ def create_app(test_config=None):
                     "break_minutes": 0,
                     "paid": bool(record.paid),
                     "paid_hours": str(record.paid_hours or ""),
-                    "color": "#d39a26" if kind == "vacation" else "#b84d55" if kind == "sickness" else "#68777b",
+                    "permit_category": getattr(record, "permit_category", None) or "",
+                    "color": "#d39a26" if kind == "vacation" else "#b84d55" if kind in {"health", "sickness"} else "#68777b",
                 }
             if key in seen:
                 continue
@@ -1179,18 +1264,23 @@ def create_app(test_config=None):
                 "worker_id": absence.worker_id,
                 "worker_name": f"{worker.first_name} {worker.last_name}",
                 "kind": absence.kind,
-                "kind_label": "Ferie" if absence.kind == "vacation" else "Malattia" if absence.kind == "sickness" else "Permesso non retribuito",
+                "kind_label": "Ferie" if absence.kind == "vacation" else "Malattia" if absence.kind in {"health", "sickness"} else "Permesso",
                 "start_date": absence.start_date,
                 "end_date": absence.end_date,
-                "start_time": (absence.start_time or time(9, 0)).strftime("%H:%M"),
-                "end_time": (absence.end_time or time(17, 0)).strftime("%H:%M"),
+                "start_time": "" if absence.kind in {"vacation", "sickness", "health"} else (absence.start_time or time(9, 0)).strftime("%H:%M"),
+                "end_time": "" if absence.kind in {"vacation", "sickness", "health"} else (absence.end_time or time(17, 0)).strftime("%H:%M"),
+                "days": vacation_working_days(absence.start_date, absence.end_date) if absence.kind == "vacation" else ((absence.end_date - absence.start_date).days + 1 if absence.kind in {"sickness", "health"} else None),
                 "paid": absence.paid,
-                "paid_hours": absence.paid_hours,
+                "paid_hours": "" if absence.kind in {"vacation", "sickness", "health"} else absence.paid_hours,
+                "permit_category": absence.permit_category or "",
+                "paid_beyond_legal_limit": bool(absence.paid_beyond_legal_limit),
+                "oncological": bool(absence.oncological),
                 "notes": absence.notes or "",
             })
         return render_template(
             "calendar.html",
             workers=workers,
+            permit_categories=PERMIT_CATEGORIES,
             locations=locations,
             recent_patterns=recent_patterns,
             recent_limit=recent_limit,
@@ -1219,7 +1309,10 @@ def create_app(test_config=None):
                 "textColor": "#ffffff",
                 "extendedProps": {
                     "type": "work",
-                    "entry_kind": "work",
+                    "entry_kind": entry.entry_kind or "ordinary",
+                    "kind_label": "Ore straordinarie" if entry.entry_kind == "overtime" else "Ore ordinarie",
+                    "paid": bool(entry.paid),
+                    "rate_override": str(entry.rate_override or ""),
                     "worker_id": entry.worker_id,
                     "worker": f"{worker.first_name} {worker.last_name}" if worker else "",
                     "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
@@ -1232,11 +1325,67 @@ def create_app(test_config=None):
         aq = Absence.query
         if worker_id:
             aq = aq.filter_by(worker_id=worker_id)
-        colors = {"vacation": "#d39a26", "sickness": "#b84d55", "unpaid_leave": "#68777b"}
-        labels = {"vacation": "Ferie", "sickness": "Malattia", "unpaid_leave": "Permesso non retribuito"}
+        colors = {"vacation": "#d39a26", "health": "#b84d55", "sickness": "#b84d55", "permit": "#68777b", "unpaid_leave": "#68777b"}
+        labels = {"vacation": "Ferie", "health": "Malattia", "sickness": "Malattia", "permit": "Permesso", "unpaid_leave": "Permesso"}
         for absence in aq.order_by(Absence.start_date).all():
             worker = db.session.get(Worker, absence.worker_id)
             employer = db.session.get(Employer, worker.employer_id) if worker and worker.employer_id else None
+            common_props = {
+                "type": "absence",
+                "entry_kind": absence.kind,
+                "absence_id": absence.id,
+                "worker_id": absence.worker_id,
+                "worker": f"{worker.first_name} {worker.last_name}" if worker else "",
+                "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
+                "start_date": str(absence.start_date),
+                "end_date": str(absence.end_date),
+                "paid": bool(absence.paid),
+                "paid_hours": "" if absence.kind in {"vacation", "sickness", "health"} else str(absence.paid_hours or 0),
+                "permit_category": absence.permit_category or "",
+                "paid_beyond_legal_limit": bool(absence.paid_beyond_legal_limit),
+                "oncological": bool(absence.oncological),
+                "notes": absence.notes or "",
+                "kind_label": PERMIT_CATEGORIES.get(absence.permit_category, "Permesso") if absence.kind == "permit" else labels.get(absence.kind, "Assenza"),
+            }
+            if absence.kind == "vacation":
+                result.append({
+                    "id": f"absence-{absence.id}",
+                    "title": "Ferie",
+                    "start": str(absence.start_date),
+                    "end": str(absence.end_date + timedelta(days=1)),
+                    "allDay": True,
+                    "backgroundColor": colors["vacation"],
+                    "borderColor": colors["vacation"],
+                    "textColor": "#ffffff",
+                    "editable": False,
+                    "extendedProps": {
+                        **common_props,
+                        "start_time": "",
+                        "end_time": "",
+                        "vacation_days": vacation_working_days(absence.start_date, absence.end_date),
+                    },
+                })
+                continue
+            if absence.kind in {"sickness", "health"}:
+                result.append({
+                    "id": f"absence-{absence.id}",
+                    "title": "Malattia",
+                    "start": str(absence.start_date),
+                    "end": str(absence.end_date + timedelta(days=1)),
+                    "allDay": True,
+                    "backgroundColor": colors["sickness"],
+                    "borderColor": colors["sickness"],
+                    "textColor": "#ffffff",
+                    "editable": False,
+                    "extendedProps": {
+                        **common_props,
+                        "entry_kind": "sickness",
+                        "start_time": "",
+                        "end_time": "",
+                        "sickness_days": (absence.end_date - absence.start_date).days + 1,
+                    },
+                })
+                continue
             start_clock = absence.start_time or time(9, 0)
             end_clock = absence.end_time or time(17, 0)
             day = absence.start_date
@@ -1251,20 +1400,9 @@ def create_app(test_config=None):
                     "textColor": "#ffffff",
                     "editable": False,
                     "extendedProps": {
-                        "type": "absence",
-                        "entry_kind": absence.kind,
-                        "absence_id": absence.id,
-                        "worker_id": absence.worker_id,
-                        "worker": f"{worker.first_name} {worker.last_name}" if worker else "",
-                        "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
-                        "start_date": str(absence.start_date),
-                        "end_date": str(absence.end_date),
+                        **common_props,
                         "start_time": start_clock.strftime("%H:%M"),
                         "end_time": end_clock.strftime("%H:%M"),
-                        "paid": bool(absence.paid),
-                        "paid_hours": str(absence.paid_hours or 0),
-                        "notes": absence.notes or "",
-                        "kind_label": labels.get(absence.kind, "Assenza"),
                     },
                 })
                 day += timedelta(days=1)
@@ -1297,6 +1435,15 @@ def create_app(test_config=None):
                 location_snapshot = str(payload.get("location") or "").strip()[:255]
             if not location_snapshot:
                 raise ValueError("Il luogo è obbligatorio")
+            entry_kind = str(payload.get("entry_kind") or "ordinary")
+            if entry_kind not in {"ordinary", "overtime"}:
+                raise ValueError("Tipologia ore non valida")
+            paid_raw = payload.get("paid", True)
+            paid = paid_raw.lower() in {"1", "true", "on", "yes"} if isinstance(paid_raw, str) else bool(paid_raw)
+            rate_override_raw = payload.get("rate_override")
+            rate_override = None
+            if entry_kind == "overtime" and rate_override_raw not in (None, ""):
+                rate_override = nonnegative_decimal(rate_override_raw, "Tariffa straordinaria")
             entry = WorkEntry(
                 worker_id=worker_id,
                 location_id=location.id if location else None,
@@ -1304,6 +1451,9 @@ def create_app(test_config=None):
                 start_time=start_time,
                 end_time=end_time,
                 break_minutes=break_minutes,
+                entry_kind=entry_kind,
+                paid=paid,
+                rate_override=rate_override,
                 location=location_snapshot[:255],
                 notes=payload.get("notes") or None,
             )
@@ -1345,6 +1495,22 @@ def create_app(test_config=None):
             entry.start_time = start_time
             entry.end_time = end_time
             entry.break_minutes = break_minutes
+            entry_kind = str(payload.get("entry_kind", entry.entry_kind or "ordinary"))
+            if entry_kind not in {"ordinary", "overtime"}:
+                raise ValueError("Tipologia ore non valida")
+            entry.entry_kind = entry_kind
+            if "paid" in payload:
+                paid_raw = payload.get("paid")
+                entry.paid = paid_raw.lower() in {"1", "true", "on", "yes"} if isinstance(paid_raw, str) else bool(paid_raw)
+            if entry_kind == "overtime":
+                rate_override_raw = payload.get("rate_override", entry.rate_override)
+                entry.rate_override = (
+                    None
+                    if rate_override_raw in (None, "")
+                    else nonnegative_decimal(rate_override_raw, "Tariffa straordinaria")
+                )
+            else:
+                entry.rate_override = None
             if "notes" in payload:
                 entry.notes = (payload.get("notes") or "").strip() or None
             db.session.commit()
@@ -1369,34 +1535,64 @@ def create_app(test_config=None):
         if worker is None:
             raise ValueError("Lavoratore non valido")
         kind = str(payload.get("kind", existing.kind if existing else "vacation"))
-        if kind not in {"vacation", "sickness", "unpaid_leave"}:
+        if kind not in {"vacation", "health", "permit", "sickness", "unpaid_leave"}:
             raise ValueError("Tipo assenza non valido")
         start_date = parse_date(payload.get("start_date", str(existing.start_date) if existing else ""), "Data iniziale")
         end_date = parse_date(payload.get("end_date", str(existing.end_date) if existing else str(start_date)), "Data finale")
         if end_date < start_date:
             raise ValueError("La data finale deve essere successiva o uguale a quella iniziale")
-        start_clock = parse_time(payload.get("start_time", existing.start_time.strftime("%H:%M") if existing and existing.start_time else "09:00"), "Inizio")
-        end_clock = parse_time(payload.get("end_time", existing.end_time.strftime("%H:%M") if existing and existing.end_time else "17:00"), "Fine")
-        validate_work_times(start_clock, end_clock, 0)
-        duration = Decimal(str((datetime.combine(start_date, end_clock) - datetime.combine(start_date, start_clock)).total_seconds() / 3600))
+        if kind in {"vacation", "health", "sickness"}:
+            start_clock = None
+            end_clock = None
+            duration = Decimal((end_date - start_date).days + 1)
+        else:
+            start_clock = parse_time(payload.get("start_time", existing.start_time.strftime("%H:%M") if existing and existing.start_time else "09:00"), "Inizio")
+            end_clock = parse_time(payload.get("end_time", existing.end_time.strftime("%H:%M") if existing and existing.end_time else "17:00"), "Fine")
+            validate_work_times(start_clock, end_clock, 0)
+            duration = Decimal(str((datetime.combine(start_date, end_clock) - datetime.combine(start_date, start_clock)).total_seconds() / 3600))
         paid_raw = payload.get("paid")
         if isinstance(paid_raw, str):
             paid = paid_raw.lower() in {"1", "true", "on", "yes"}
         elif paid_raw is None and existing is not None:
             paid = bool(existing.paid)
+        elif paid_raw is None:
+            paid = True
         else:
             paid = bool(paid_raw)
+        if kind == "health":
+            kind = "sickness"
+        elif kind == "unpaid_leave":
+            kind = "permit"
         if kind == "vacation":
             paid = True
+        permit_category = None
+        if kind == "permit":
+            permit_category = str(payload.get("permit_category", getattr(existing, "permit_category", None) or ("medical" if paid else "other")))
+            if permit_category not in PERMIT_CATEGORIES:
+                raise ValueError("Categoria permesso non valida")
+            if paid and permit_category == "other":
+                raise ValueError("La categoria Altro è disponibile solo per permessi non retribuiti")
         paid_hours_raw = payload.get("paid_hours")
-        if paid_hours_raw not in (None, ""):
-            paid_hours = nonnegative_decimal(paid_hours_raw, "Ore pagate")
-        elif not paid:
+        if not paid:
             paid_hours = Decimal("0")
         elif kind == "vacation":
-            paid_hours = duration * Decimal(vacation_working_days(start_date, end_date))
+            paid_hours = vacation_hours_per_day(worker) * Decimal(
+                vacation_working_days(start_date, end_date)
+            )
+        elif kind == "sickness":
+            # Malattia is always day-based. Legacy clients may still send
+            # start_time/end_time or paid_hours; those values are deliberately
+            # ignored. Equivalent payroll hours are derived internally from the
+            # worker schedule and never change the number of sickness days.
+            paid_hours = vacation_hours_per_day(worker) * duration
+        elif paid_hours_raw not in (None, ""):
+            paid_hours = nonnegative_decimal(paid_hours_raw, "Ore pagate")
         else:
             paid_hours = duration * Decimal((end_date - start_date).days + 1)
+        override_raw = payload.get("paid_beyond_legal_limit")
+        paid_beyond_legal_limit = str(override_raw).lower() in {"1", "true", "on", "yes"} if override_raw is not None else bool(getattr(existing, "paid_beyond_legal_limit", False))
+        oncological_raw = payload.get("oncological")
+        oncological = str(oncological_raw).lower() in {"1", "true", "on", "yes"} if oncological_raw is not None else bool(getattr(existing, "oncological", False))
         return worker, {
             "worker_id": worker.id,
             "start_date": start_date,
@@ -1406,6 +1602,9 @@ def create_app(test_config=None):
             "kind": kind,
             "paid": paid,
             "paid_hours": paid_hours,
+            "permit_category": permit_category,
+            "paid_beyond_legal_limit": paid_beyond_legal_limit,
+            "oncological": oncological if kind == "sickness" else False,
             "notes": (payload.get("notes") if "notes" in payload else existing.notes if existing else None) or None,
         }
 
@@ -1427,6 +1626,26 @@ def create_app(test_config=None):
                     f"Ferie insufficienti per {year}: abilita la fruizione anticipata delle ferie da maturare oppure riduci il periodo"
                 )
 
+    def _validate_permit_balance(worker, absence, replacing=None):
+        existing = Absence.query.filter_by(worker_id=worker.id).all()
+        validate_paid_permit(worker, existing, absence, replacing=replacing)
+
+    def _validate_sickness_balance(worker, absence, replacing=None):
+        if absence.kind != "sickness" or not absence.paid or absence.paid_beyond_legal_limit:
+            return
+        existing = Absence.query.filter_by(worker_id=worker.id).all()
+        if replacing is not None:
+            existing = [item for item in existing if item.id != replacing.id]
+        for year in range(absence.start_date.year, absence.end_date.year + 1):
+            year_start, year_end = date(year, 1, 1), date(year, 12, 31)
+            used = sum((sickness_days_in_period(a, year_start, year_end) for a in existing if a.kind in {"sickness", "health"} and a.paid), Decimal("0"))
+            requested = sickness_days_in_period(absence, year_start, year_end)
+            if requested <= 0:
+                continue
+            rule = sickness_rule(worker, max(absence.start_date, year_start), absence.oncological)
+            if rule.get("known") and used + requested > rule["paid_days_limit"]:
+                raise ValueError(f"Limite contrattuale di malattia retribuita superato ({rule['paid_days_limit']} giorni). Abilita il trattamento di miglior favore del datore per retribuire l'eccedenza.")
+
     @app.post("/api/absence")
     @login_required
     def add_absence():
@@ -1436,7 +1655,12 @@ def create_app(test_config=None):
                 raise ValueError("Payload mancante")
             worker, values = _absence_values(payload)
             absence = Absence(**values)
-            _validate_vacation_balance(worker, absence)
+            if absence.kind == "vacation":
+                _validate_vacation_balance(worker, absence)
+            elif absence.kind == "permit":
+                _validate_permit_balance(worker, absence)
+            elif absence.kind == "sickness":
+                _validate_sickness_balance(worker, absence)
             db.session.add(absence)
             db.session.commit()
             audit("absence_created", "absence", absence.id)
@@ -1459,10 +1683,13 @@ def create_app(test_config=None):
             "employer": f"{employer.first_name} {employer.last_name}" if employer else "Datore non associato",
             "start_date": str(absence.start_date),
             "end_date": str(absence.end_date),
-            "start_time": (absence.start_time or time(9, 0)).strftime("%H:%M"),
-            "end_time": (absence.end_time or time(17, 0)).strftime("%H:%M"),
+            "start_time": "" if absence.kind in {"vacation", "sickness", "health"} else (absence.start_time or time(9, 0)).strftime("%H:%M"),
+            "end_time": "" if absence.kind in {"vacation", "sickness", "health"} else (absence.end_time or time(17, 0)).strftime("%H:%M"),
             "paid": bool(absence.paid),
-            "paid_hours": str(absence.paid_hours or 0),
+            "paid_hours": "" if absence.kind in {"vacation", "sickness", "health"} else str(absence.paid_hours or 0),
+            "permit_category": absence.permit_category or "",
+            "paid_beyond_legal_limit": bool(absence.paid_beyond_legal_limit),
+            "oncological": bool(absence.oncological),
             "notes": absence.notes or "",
         })
 
@@ -1474,7 +1701,12 @@ def create_app(test_config=None):
         try:
             worker, values = _absence_values(payload, absence)
             candidate = Absence(**values)
-            _validate_vacation_balance(worker, candidate, replacing=absence)
+            if candidate.kind == "vacation":
+                _validate_vacation_balance(worker, candidate, replacing=absence)
+            elif candidate.kind == "permit":
+                _validate_permit_balance(worker, candidate, replacing=absence)
+            elif candidate.kind == "sickness":
+                _validate_sickness_balance(worker, candidate, replacing=absence)
             for key, value in values.items():
                 setattr(absence, key, value)
             db.session.commit()
@@ -1502,7 +1734,12 @@ def create_app(test_config=None):
             payload.setdefault("end_time", "17:00")
             worker, values = _absence_values(payload)
             absence = Absence(**values)
-            _validate_vacation_balance(worker, absence)
+            if absence.kind == "vacation":
+                _validate_vacation_balance(worker, absence)
+            elif absence.kind == "permit":
+                _validate_permit_balance(worker, absence)
+            elif absence.kind == "sickness":
+                _validate_sickness_balance(worker, absence)
             db.session.add(absence)
             db.session.commit()
             audit("absence_created", "absence", absence.id)
@@ -2231,13 +2468,13 @@ def create_app(test_config=None):
         if month not in range(1, 13) or year < 1990 or year > 2200:
             raise ValueError("Periodo non valido")
         worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker_id)
-        return monthly_summary(entries, absences_list, expenses_list, rates_list, year, month, _tfr_factor())
+        return monthly_summary(entries, absences_list, expenses_list, rates_list, year, month, _tfr_factor(), worker)
 
     def get_annual(worker_id, year):
         if year < 1990 or year > 2200:
             raise ValueError("Anno non valido")
         worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker_id)
-        return worker, annual_summary(entries, absences_list, expenses_list, rates_list, year, _tfr_factor()), vacation_balance(worker, absences_list, year)
+        return worker, annual_summary(entries, absences_list, expenses_list, rates_list, year, _tfr_factor(), worker), vacation_balance(worker, absences_list, year)
 
     def _employer_for(worker):
         return db.session.get(Employer, worker.employer_id) if worker.employer_id else None
@@ -2446,6 +2683,16 @@ def create_app(test_config=None):
             flash(str(exc), "error")
         selected = db.session.get(Worker, worker_id) if worker_id else None
         selected_employer = _employer_for(selected) if selected else None
+        permit_overview = (
+            permit_metrics(
+                selected,
+                Absence.query.filter_by(worker_id=worker_id).all(),
+                year,
+                min(date.today(), date(year, 12, 31)),
+            )
+            if selected
+            else []
+        )
         default_place = (selected_employer.city or selected_employer.address or "") if selected_employer else ""
         period_start = date(year, month, 1) if month in range(1, 13) else None
         period_end = date(year, month, monthrange(year, month)[1]) if period_start else None
@@ -2469,6 +2716,7 @@ def create_app(test_config=None):
             paid_salary=paid_salary,
             residual_salary=residual_salary,
             created_report=request.args.get("created_report", type=int),
+            permit_overview=permit_overview,
         )
 
     @app.get("/reports/payroll.pdf")
@@ -2520,6 +2768,8 @@ def create_app(test_config=None):
                 ],
                 approval=_report_approval(worker, "both"),
                 payments=period_payments,
+                permits=permit_metrics(worker, absences_list, year, period_end),
+                sickness=sickness_metrics(worker, absences_list, year, period_end),
             ),
             period_start,
             period_end,
@@ -2534,6 +2784,7 @@ def create_app(test_config=None):
         if worker_id is None or year is None:
             abort(400)
         worker, annual, vacation = get_annual(worker_id, year)
+        annual_absences = Absence.query.filter_by(worker_id=worker_id).all()
         start, end = date(year, 1, 1), date(year, 12, 31)
         audit("annual_payroll_downloaded", "worker", worker_id, str(year))
         return _archive_pdf(
@@ -2550,6 +2801,8 @@ def create_app(test_config=None):
                 Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
                 approval=_report_approval(worker, "both"),
                 payments=_payments_for_period(worker.id, start, end),
+                permits=permit_metrics(worker, annual_absences, year, end),
+                sickness=sickness_metrics(worker, annual_absences, year, end),
             ),
             start,
             end,
@@ -2630,7 +2883,7 @@ def create_app(test_config=None):
         cutoff = date(year, 12, 31) if through_year_end or year < date.today().year else date.today()
         start = date(year, 1, 1)
         th = thirteenth_year_summary(worker, entries, absences_list, expenses_list, rates_list, year, cutoff)
-        annual = annual_summary([e for e in entries if e.work_date <= cutoff], [a for a in absences_list if a.start_date <= cutoff], [x for x in expenses_list if x.expense_date <= cutoff], rates_list, year, _tfr_factor())
+        annual = annual_summary([e for e in entries if e.work_date <= cutoff], [a for a in absences_list if a.start_date <= cutoff], [x for x in expenses_list if x.expense_date <= cutoff], rates_list, year, _tfr_factor(), worker)
         audit("thirteenth_report_downloaded", "worker", worker_id, str(year))
         return _archive_pdf(
             worker,
@@ -2697,6 +2950,7 @@ def create_app(test_config=None):
         if worker_id is None or year is None:
             abort(400)
         worker, annual, _ = get_annual(worker_id, year)
+        trend_absences = Absence.query.filter_by(worker_id=worker_id).all()
         start, end = date(year, 1, 1), date(year, 12, 31)
         audit("trend_report_downloaded", "worker", worker_id, str(year))
         return _archive_pdf(
@@ -2712,6 +2966,8 @@ def create_app(test_config=None):
                 Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
                 approval=_report_approval(worker, "none"),
                 payments=_payments_for_period(worker.id, start, end),
+                permits=permit_metrics(worker, trend_absences, year, end),
+                sickness=sickness_metrics(worker, trend_absences, year, end),
             ),
             start,
             end,
@@ -2855,7 +3111,7 @@ def create_app(test_config=None):
                         f"DTSTAMP:{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}",
                         f"DTSTART:{start.strftime('%Y%m%dT%H%M%S')}",
                         f"DTEND:{end.strftime('%Y%m%dT%H%M%S')}",
-                        f"SUMMARY:{_calendar_escape('Ore · ' + worker_name)}",
+                        f"SUMMARY:{_calendar_escape(('Ore straordinarie' if entry.entry_kind == 'overtime' else 'Ore ordinarie') + ' · ' + worker_name)}",
                         f"LOCATION:{_calendar_escape(entry.location)}",
                         f"DESCRIPTION:{_calendar_escape(entry.notes or '')}",
                         "END:VEVENT",
@@ -2875,7 +3131,7 @@ def create_app(test_config=None):
                     end_time = absence.end_time or time(17, 0)
                     start = datetime.combine(current, start_time)
                     end = datetime.combine(current, end_time)
-                    kind_label = "Ferie" if absence.kind == "vacation" else "Malattia"
+                    kind_label = "Ferie" if absence.kind == "vacation" else "Malattia" if absence.kind in {"health", "sickness"} else "Permesso"
                     lines.extend(
                         [
                             "BEGIN:VEVENT",

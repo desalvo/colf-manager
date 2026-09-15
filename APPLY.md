@@ -1,16 +1,16 @@
-# colf-manager r59 full package
+# colf-manager r67 full package
 
 This is a complete repository snapshot, not an incremental patch.
 
 ```bash
-unzip colf-manager-r59-full.zip
+unzip colf-manager-r67-full.zip
 cd /root/colf-manager
 rsync -a --delete --exclude .git /path/to/extracted/colf-manager/ ./
 source .venv/bin/activate
 scripts/check-all.sh
 ```
 
-Expected production gate result: `Production gate r59 full passed.`
+Expected production gate result: `Production gate r67 full passed.`
 
 
 Local packaged photographic assets are bundled in `src/colf_manager/static/heroes/`.

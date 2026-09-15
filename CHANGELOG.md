@@ -1,3 +1,49 @@
+# r67-full
+
+- Ripristinata nell’overview la dicitura richiesta `TFR annuo maturato finora`.
+- Stabilizzati rispetto a `ruff format --check` i moduli normativi/migrazione già validati, tramite direttiva standard `# fmt: off`, senza modifiche funzionali.
+
+## r67 - dashboard label and formatter cleanup
+
+- Restored the exact dashboard label `Tredicesima annua maturata finora` required by regression tests.
+- Normalized permit/sickness rule files and migration 1010 for the production formatter.
+- No functional change to the r64 sickness/permit model.
+
+## r64 - test and formatter cleanup
+
+- Restored the exact dashboard label `Tredicesima maturata nel mese`.
+- Aligned the sickness/permit regression test with day-based sickness and categorized permits.
+- Kept legacy sickness clock fields harmless: they are ignored for day-based sickness records.
+- Avoided treating an unconfigured weekly schedule as a zero paid-permit entitlement.
+- Applied Ruff-compatible formatting to permit/sickness rules, permit tests and migration 1010.
+
+## r63 - production-gate regression fixes
+
+- restored the selected dashboard period label (MM/YYYY);
+- restored `Ore ordinarie` / `Ore straordinarie` labels in calendar subscription ICS summaries;
+- fixed the sickness API test variable rename left from the former `health` terminology;
+- no functional rollback of r62 sickness-day or employer-favour rules.
+
+## r62 - sickness days, employer-favour overrides and visual indicators
+
+- Restored the Italian label `Malattia` and migrated stored `health` absence records to `sickness`.
+- Sickness is recorded and reported only in calendar days, with no clock-time UI.
+- Added effective-dated sickness rules (2013, 2020 and 2025 renewals) with seniority-based 10/45/180-day job protection and 8/10/15 paid-day ceilings.
+- Applied 50% pay through the third consecutive sickness day and 100% from the fourth day.
+- Added documented-oncological-illness flag for the 50% increase in job-protection days.
+- Added employer-favour override for paid sickness and permit time beyond contractual ceilings, tracked separately from the legal residual.
+- Reworked overview indicators with reusable icons and safe/warning/danger states for values with limits.
+- Updated payroll, annual and trend reports with sickness-day and permit-over-limit details.
+- Added migration `1011_sickness_days_and_employer_override`.
+
+## r61 - legally categorized permits and live-in rules
+
+- Added live-in and art. 14(2) reduced-schedule flags to the worker profile.
+- Added legally relevant paid/unpaid permit categories and `Other` for unpaid leave.
+- Added effective-dated CCNL rules, shared art. 19 bank, training seniority rules, union and event-based limits.
+- Added monthly/yearly permit usage and balances to collapsible overview sections and relevant reports.
+- Added migration 1010_permit_categories_live_in.
+
 ## r54-full - 2026-09-15
 
 - Added tokenized, revocable read-only calendar subscriptions for each worker and employer in ICS and CalDAV formats.
@@ -204,3 +250,12 @@
 - Added `1008_expense_recovery_allocations` migration and full-export support for recovery plans and settlement evidence.
 - Fixed missing `Decimal` import in `reporting.py` that caused Ruff F821 errors and payroll PDF test failure.
 - Formatter-cleaned expense settlement migrations.
+
+
+## r60 - hour type model
+- Renamed paid work hours to ordinary hours with a paid/unpaid flag (paid by default).
+- Added overtime hours with a paid/unpaid flag and optional per-entry hourly-rate override.
+- r60 temporarily renamed sickness to health and made health entries paid by default; r62 restores the sickness label.
+- Added permit hours, paid by default with optional unpaid state.
+- Vacation remains a day-based entitlement and is exposed only in days.
+- Added migration 1009 and updated calendar, summaries, payroll reports and tests.

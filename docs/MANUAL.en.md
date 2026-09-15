@@ -34,7 +34,7 @@ The management accrual uses a configurable divisor, initially 13.5, on recorded 
 
 ## Security and privacy
 
-Records are personal data and may include health-related information. Use HTTPS, least privilege, encrypted storage/backups, documented retention and data minimization. Avoid entering medical diagnoses. The supplied container runs unprivileged with a read-only root filesystem and no Linux capabilities.
+Records are personal data and may include sickness-related information. Use HTTPS, least privilege, encrypted storage/backups, documented retention and data minimization. Avoid entering medical diagnoses. The supplied container runs unprivileged with a read-only root filesystem and no Linux capabilities.
 
 ## Build and release
 
@@ -101,9 +101,9 @@ Local packaged photographic assets are bundled in `src/colf_manager/static/heroe
 ## r32: report approvals and signatures
 Reports may include an approval section for the worker, employer, both, or no signer. Names are prefilled automatically. Place and date can be edited before generation; the proposed date is the report generation date. Signature information is embedded in the archived PDF. Local hero and photographic assets remain bundled under `src/colf_manager/static/heroes/`.
 
-## Calendar: paid work, vacation and sickness
+## Calendar: ordinary hours, overtime, sickness, permits and vacation
 
-From r37 the same calendar dialog lets the user select **Paid work**, **Vacation** or **Sickness**. Vacation and sickness are stored as timed intervals and may coexist on the same day with paid work. For multi-day periods, both the start and end dates are always included. Vacation and sickness use dedicated colors, while paid work keeps a stable color determined by the employer/worker/location combination. Clicking an interval allows it to be viewed, edited or deleted.
+From r62 the calendar distinguishes **Ordinary hours**, **Overtime hours**, **Sickness**, **Permit hours** and **Vacation**. Ordinary and overtime hours are paid by default but may be marked unpaid. Overtime automatically uses the hourly rate effective on the entry date; an optional rate may be supplied for that entry only. Sickness and permit hours are paid by default and can also be marked unpaid. Vacation is not an hour type: it is recorded, displayed and reported exclusively in **days**, without start/end clock times.
 
 ## r42: drag and drop and hours trend by location
 
@@ -123,7 +123,7 @@ Workers and employers now include City, Province and Postal Code. Report signatu
 
 ## r48: calendar subscriptions and settings
 
-**Settings** now includes the external application URL and read-only calendar subscriptions for individual workers or employers. Each enabled calendar exposes a token-protected **ICS** link and **CalDAV** endpoint; employer calendars aggregate events for their associated workers. Feeds include paid work, vacation and sickness. Personal password changes are now integrated into Settings.
+**Settings** now includes the external application URL and read-only calendar subscriptions for individual workers or employers. Each enabled calendar exposes a token-protected **ICS** link and **CalDAV** endpoint; employer calendars aggregate events for their associated workers. Feeds include ordinary hours, overtime, sickness, permits and day-based vacation. Personal password changes are now integrated into Settings.
 
 ## Graphic signatures in reports
 Worker and employer records can store a graphic signature in PNG, JPEG, TIFF, WEBP or BMP format. When a report requires that party's signature and a signature is registered, the image is automatically placed in the signature area; otherwise a manual signature line is shown. Every PDF also carries the colf-manager logo, version/build and author.
@@ -135,3 +135,28 @@ Generating a monthly payslip automatically creates a residual Pending salary ite
 
 ## Report archive and backup
 After generating a report from the UI, the Reports page refreshes automatically and the new document is immediately visible in the archive. Archived reports can be viewed in the browser, downloaded, emailed or deleted. Full export includes the database, documents, reports, graphic signatures, payments and payment attachments; full import restores the same content and relationships.
+
+
+## r60: complete hour-type model
+
+Work records now distinguish ordinary and overtime hours. Each record has a paid/unpaid flag and defaults to paid. Overtime uses the effective hourly rate, with an optional override that applies only to that record. Summaries and payslips distinguish total hours, ordinary hours, overtime hours and unpaid work hours.
+
+The former Sickness entry is renamed **Sickness** and new sickness records are paid by default. **Permit hours** are added as a separate type, also paid by default and optionally unpaid. Existing Sickness data is migrated to Sickness.
+
+**Vacation** remains a day-based entitlement: the UI does not request clock times, the calendar renders vacation as day events, and reports/dashboard always expose vacation in days. Any internal conversion needed for monetary calculation is not presented as a vacation-hour balance.
+
+
+## r61: contract-based permit categories
+
+The worker profile now records **live-in** status and, where applicable, the reduced live-in schedule under CCNL art. 14(2). A relevant union-office flag is also available for union leave eligibility.
+
+Permit categories cover documented medical visits, residence-permit renewal, family reunification, certified severe-disability family care, bereavement/family misfortune, childbirth for fathers, professional training, Ebincolf training and union leave. **Other** is also available for unpaid permits.
+
+Rules are effective-dated. Under the CCNL effective from 1 November 2025 the shared art. 19 paid bank is 16 hours/year for live-in workers, 12 hours for art. 14(2) reduced live-in arrangements, 12 hours for non-live-in workers working at least 30 hours/week, and proportionally reduced below 30 hours/week. Medical visits, residence-permit renewal, family reunification and certified severe-disability family care share this bank. Professional training requires full-time permanent employment and at least 6 months' seniority under the 2025-2028 CCNL; the earlier period uses the previous 12-month requirement.
+
+Bereavement and childbirth are event-based rights and are not misrepresented as annual banks. The overview shows paid/unpaid monthly and yearly usage, available entitlement, annual total where legally defined, and remaining balances in collapsed-by-default sections. Relevant monthly, annual and trend reports include the same permit information.
+
+
+## r62: sickness in days and visual indicators
+
+Sickness is now recorded exclusively in calendar days, with no clock times. The engine selects the contractual rule effective on the recorded date: job-protection limits and paid-sickness limits are kept separate, with 50% through the third consecutive day and 100% from the fourth day. The employer may authorize more favourable treatment and pay sickness days or permit hours beyond the contractual ceiling; the excess remains separate from the legal/contractual residual entitlement. Every overview indicator has an icon and limited indicators use a visual threshold state.

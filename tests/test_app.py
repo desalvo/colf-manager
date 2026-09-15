@@ -683,8 +683,10 @@ def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):
         for event in events
         if event["extendedProps"].get("absence_id") == absence_id
     ]
-    assert len(vacation_events) == 2
-    assert {e["start"][:10] for e in vacation_events} == {"2026-09-14", "2026-09-15"}
+    assert len(vacation_events) == 1
+    assert vacation_events[0]["start"] == "2026-09-14"
+    assert vacation_events[0]["end"] == "2026-09-16"
+    assert vacation_events[0]["allDay"] is True
     assert all(e["extendedProps"]["entry_kind"] == "vacation" for e in vacation_events)
     assert any(
         e["id"].startswith("work-") and e["start"].startswith("2026-09-14T14:00")
@@ -717,13 +719,67 @@ def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):
     ]
     assert len(sickness_events) == 1
     assert sickness_events[0]["extendedProps"]["entry_kind"] == "sickness"
-    assert sickness_events[0]["start"].startswith("2026-09-16T08:00")
+    assert sickness_events[0]["start"] == "2026-09-16"
+    assert sickness_events[0]["allDay"] is True
 
     assert client.delete(f"/api/absence/{absence_id}").status_code == 200
     with app.app_context():
         assert Absence.query.count() == 0
         assert WorkEntry.query.count() == 1
 
+
+
+def test_hour_types_paid_flags_and_overtime_rate(app):
+    with app.app_context():
+        rates = [HourlyRate(valid_from=date(2026, 1, 1), amount=Decimal("10.00"))]
+        entries = [
+            WorkEntry(work_date=date(2026, 9, 1), start_time=time(9), end_time=time(11), break_minutes=0, location="Casa", entry_kind="ordinary", paid=True),
+            WorkEntry(work_date=date(2026, 9, 2), start_time=time(9), end_time=time(11), break_minutes=0, location="Casa", entry_kind="overtime", paid=True, rate_override=Decimal("15.00")),
+            WorkEntry(work_date=date(2026, 9, 3), start_time=time(9), end_time=time(10), break_minutes=0, location="Casa", entry_kind="ordinary", paid=False),
+        ]
+        summary = monthly_summary(entries, [], [], rates, 2026, 9)
+        assert summary["worked_hours"] == Decimal("5.00")
+        assert summary["ordinary_hours"] == Decimal("3.00")
+        assert summary["overtime_hours"] == Decimal("2.00")
+        assert summary["unpaid_work_hours"] == Decimal("1.00")
+        assert summary["worked_pay"] == Decimal("50.00")
+
+
+def test_sickness_and_permit_default_to_paid_and_vacation_is_days(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = Decimal("40")
+        db.session.commit()
+    login(client)
+    sickness = client.post(
+        "/api/absence",
+        json={
+            "worker_id": worker_id,
+            "kind": "sickness",
+            "start_date": "2026-09-10",
+            "end_date": "2026-09-10",
+        },
+    )
+    permit = client.post(
+        "/api/absence",
+        json={
+            "worker_id": worker_id,
+            "kind": "permit",
+            "permit_category": "medical",
+            "start_date": "2026-09-11",
+            "end_date": "2026-09-11",
+            "start_time": "09:00",
+            "end_time": "10:00",
+        },
+    )
+    assert sickness.status_code == 201
+    assert permit.status_code == 201
+    with app.app_context():
+        records = Absence.query.order_by(Absence.id).all()
+        assert records[0].kind == "sickness" and records[0].paid is True
+        assert records[0].start_time is None and records[0].end_time is None
+        assert records[1].kind == "permit" and records[1].paid is True
 
 def test_reports_default_signature_place_is_employer_city(app, client):
     with app.app_context():

@@ -64,6 +64,9 @@ class Worker(db.Model):
     employment_start = db.Column(db.Date, nullable=False, default=date.today)
     employment_end = db.Column(db.Date)
     weekly_hours = db.Column(db.Numeric(6, 2), default=0)
+    live_in = db.Column(db.Boolean, default=False, nullable=False)
+    live_in_reduced_schedule = db.Column(db.Boolean, default=False, nullable=False)
+    union_officer = db.Column(db.Boolean, default=False, nullable=False)
     vacation_advance_allowed = db.Column(db.Boolean, default=False, nullable=False)
     signature_stored_name = db.Column(db.String(255))
     signature_filename = db.Column(db.String(255))
@@ -92,7 +95,11 @@ class Location(db.Model):
 
 
 class WorkEntry(db.Model):
-    __table_args__ = (CheckConstraint("break_minutes >= 0", name="ck_work_break_nonnegative"),)
+    __table_args__ = (
+        CheckConstraint("break_minutes >= 0", name="ck_work_break_nonnegative"),
+        CheckConstraint("entry_kind IN ('ordinary','overtime')", name="ck_work_entry_kind"),
+        CheckConstraint("rate_override IS NULL OR rate_override >= 0", name="ck_work_rate_override_nonnegative"),
+    )
     id = db.Column(db.Integer, primary_key=True)
     worker_id = db.Column(db.Integer, db.ForeignKey("worker.id", ondelete="CASCADE"), nullable=False, index=True)
     location_id = db.Column(db.Integer, db.ForeignKey("location.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -100,6 +107,9 @@ class WorkEntry(db.Model):
     start_time = db.Column(db.Time, nullable=False)
     end_time = db.Column(db.Time, nullable=False)
     break_minutes = db.Column(db.Integer, default=0, nullable=False)
+    entry_kind = db.Column(db.String(20), default="ordinary", nullable=False, index=True)
+    paid = db.Column(db.Boolean, default=True, nullable=False)
+    rate_override = db.Column(db.Numeric(10, 2))
     location = db.Column(db.String(255), nullable=False)
     notes = db.Column(db.Text)
 
@@ -123,8 +133,11 @@ class Absence(db.Model):
     start_time = db.Column(db.Time)
     end_time = db.Column(db.Time)
     kind = db.Column(db.String(20), nullable=False)
-    paid = db.Column(db.Boolean, default=False, nullable=False)
+    paid = db.Column(db.Boolean, default=True, nullable=False)
     paid_hours = db.Column(db.Numeric(8, 2), default=0)
+    permit_category = db.Column(db.String(40), index=True)
+    paid_beyond_legal_limit = db.Column(db.Boolean, default=False, nullable=False)
+    oncological = db.Column(db.Boolean, default=False, nullable=False)
     notes = db.Column(db.Text)
 
 

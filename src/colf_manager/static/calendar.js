@@ -6,6 +6,16 @@ const entryKind = document.getElementById('entryKind');
 const workOnlyFields = document.getElementById('workOnlyFields');
 const absenceOnlyFields = document.getElementById('absenceOnlyFields');
 const endDateField = document.getElementById('endDateField');
+const paidWork = document.getElementById('paidWork');
+const overtimeRateField = document.getElementById('overtimeRateField');
+const absenceHoursField = document.getElementById('absenceHoursField');
+const vacationDaysNote = document.getElementById('vacationDaysNote');
+const sicknessDaysNote = document.getElementById('sicknessDaysNote');
+const oncologicalField = document.getElementById('oncologicalField');
+const legalOverrideField = document.getElementById('legalOverrideField');
+const timeFields = document.getElementById('timeFields');
+const permitCategoryField = document.getElementById('permitCategoryField');
+const permitCategory = document.getElementById('permitCategory');
 
 function csrfToken() {
   return document.querySelector('meta[name="csrf-token"]').content;
@@ -27,38 +37,50 @@ function addMinutes(date, minutes) {
 }
 
 function syncEntryKind() {
-  const isWork = entryKind.value === 'work';
+  const isWork = ['ordinary', 'overtime'].includes(entryKind.value);
+  const isVacation = entryKind.value === 'vacation';
+  const isSickness = entryKind.value === 'sickness';
+  const isDayAbsence = isVacation || isSickness;
   workOnlyFields.classList.toggle('hidden', !isWork);
   absenceOnlyFields.classList.toggle('hidden', isWork);
   endDateField.classList.toggle('hidden', isWork);
+  overtimeRateField.classList.toggle('hidden', entryKind.value !== 'overtime');
+  absenceHoursField.classList.toggle('hidden', isDayAbsence);
+  vacationDaysNote.classList.toggle('hidden', !isVacation);
+  sicknessDaysNote.classList.toggle('hidden', !isSickness);
+  oncologicalField.classList.toggle('hidden', !isSickness);
+  legalOverrideField.classList.toggle('hidden', !(isSickness || entryKind.value === 'permit'));
+  timeFields.classList.toggle('hidden', isDayAbsence);
+  permitCategoryField.classList.toggle('hidden', entryKind.value !== 'permit');
   workForm.querySelector('[name=location_id]').required = isWork;
   workForm.querySelector('[name=end_date]').required = !isWork;
+  workForm.querySelector('[name=start_time]').required = !isDayAbsence;
+  workForm.querySelector('[name=end_time]').required = !isDayAbsence;
   if (!isWork) {
     const firstDate = workForm.querySelector('[name=work_date]').value;
     if (!workForm.querySelector('[name=end_date]').value) workForm.querySelector('[name=end_date]').value = firstDate;
     const paid = document.getElementById('paidAbsence');
-    if (entryKind.value === 'vacation') {
-      paid.checked = true;
-      paid.disabled = true;
-    } else {
-      paid.disabled = false;
-    }
+    paid.checked = true;
+    paid.disabled = isVacation;
+    if (entryKind.value === 'permit' && permitCategory && !permitCategory.value) permitCategory.value = 'medical';
   }
 }
 
 function resetWorkForm() {
   workForm.reset();
   workForm.querySelector('[name=record_id]').value = '';
-  entryKind.value = 'work';
+  entryKind.value = 'ordinary';
   workForm.querySelector('[name=start_time]').value = '09:00';
   workForm.querySelector('[name=end_time]').value = '13:00';
   workForm.querySelector('[name=break_minutes]').value = '0';
+  paidWork.checked = true;
+  workForm.querySelector('[name=rate_override]').value = '';
   document.getElementById('workDialogTitle').textContent = 'Nuova registrazione';
   deleteWorkButton.classList.add('hidden');
   syncEntryKind();
 }
 
-function openEntryModal(day, startTime, kind = 'work') {
+function openEntryModal(day, startTime, kind = 'ordinary') {
   resetWorkForm();
   entryKind.value = kind;
   const chosen = day || localDateString(calendar.getDate());
@@ -79,7 +101,7 @@ function openEditModal(event) {
   resetWorkForm();
   const props = event.extendedProps;
   if (props.type === 'work') {
-    entryKind.value = 'work';
+    entryKind.value = props.entry_kind || 'ordinary';
     workForm.querySelector('[name=record_id]').value = event.id.replace('work-', '');
     workForm.querySelector('[name=worker_id]').value = props.worker_id;
     workForm.querySelector('[name=work_date]').value = event.startStr.slice(0, 10);
@@ -87,8 +109,10 @@ function openEditModal(event) {
     workForm.querySelector('[name=end_time]').value = event.endStr.slice(11, 16);
     workForm.querySelector('[name=location_id]').value = props.location_id || '';
     workForm.querySelector('[name=break_minutes]').value = props.break_minutes || 0;
+    paidWork.checked = props.paid !== false;
+    workForm.querySelector('[name=rate_override]').value = props.rate_override || '';
     workForm.querySelector('[name=notes]').value = props.notes || '';
-    document.getElementById('workDialogTitle').textContent = 'Modifica ore retribuite';
+    document.getElementById('workDialogTitle').textContent = props.entry_kind === 'overtime' ? 'Modifica ore straordinarie' : 'Modifica ore ordinarie';
   } else if (props.type === 'absence') {
     entryKind.value = props.entry_kind;
     workForm.querySelector('[name=record_id]').value = props.absence_id;
@@ -99,8 +123,11 @@ function openEditModal(event) {
     workForm.querySelector('[name=end_time]').value = props.end_time;
     workForm.querySelector('[name=paid]').checked = Boolean(props.paid);
     workForm.querySelector('[name=paid_hours]').value = props.paid_hours || '';
+    workForm.querySelector('[name=paid_beyond_legal_limit]').checked = Boolean(props.paid_beyond_legal_limit);
+    workForm.querySelector('[name=oncological]').checked = Boolean(props.oncological);
+    if (permitCategory) permitCategory.value = props.permit_category || (props.paid ? 'medical' : 'other');
     workForm.querySelector('[name=notes]').value = props.notes || '';
-    document.getElementById('workDialogTitle').textContent = props.entry_kind === 'vacation' ? 'Modifica ferie' : 'Modifica malattia';
+    document.getElementById('workDialogTitle').textContent = props.entry_kind === 'vacation' ? 'Modifica ferie' : props.entry_kind === 'sickness' ? 'Modifica malattia' : 'Modifica permesso';
   } else {
     return;
   }
@@ -126,8 +153,11 @@ async function openAbsenceById(absenceId) {
   workForm.querySelector('[name=end_time]').value = data.end_time;
   workForm.querySelector('[name=paid]').checked = Boolean(data.paid);
   workForm.querySelector('[name=paid_hours]').value = data.paid_hours || '';
+  workForm.querySelector('[name=paid_beyond_legal_limit]').checked = Boolean(data.paid_beyond_legal_limit);
+  workForm.querySelector('[name=oncological]').checked = Boolean(data.oncological);
+  if (permitCategory) permitCategory.value = data.permit_category || (data.paid ? 'medical' : 'other');
   workForm.querySelector('[name=notes]').value = data.notes || '';
-  document.getElementById('workDialogTitle').textContent = data.kind === 'vacation' ? 'Modifica ferie' : 'Modifica malattia';
+  document.getElementById('workDialogTitle').textContent = data.kind === 'vacation' ? 'Modifica ferie' : data.kind === 'sickness' ? 'Modifica malattia' : 'Modifica permesso';
   syncEntryKind();
   deleteWorkButton.classList.remove('hidden');
   workDialog.showModal();
@@ -163,8 +193,8 @@ async function deleteCurrentRecord() {
   const recordId = workForm.querySelector('[name=record_id]').value;
   if (!recordId) return;
   const kind = entryKind.value;
-  const isWork = kind === 'work';
-  const label = isWork ? 'questa registrazione di ore' : kind === 'vacation' ? 'queste ferie' : 'questa malattia';
+  const isWork = ['ordinary', 'overtime'].includes(kind);
+  const label = isWork ? 'questa registrazione di ore' : kind === 'vacation' ? 'queste ferie' : kind === 'sickness' ? 'questa registrazione di malattia' : 'questo permesso';
   if (!confirm(`Eliminare definitivamente ${label}?`)) return;
   const response = await fetch(isWork ? `/api/work/${recordId}` : `/api/absence/${recordId}`, {
     method: 'DELETE',
@@ -186,14 +216,14 @@ function initExternalPatterns() {
     eventData: (el) => {
       const color = getComputedStyle(el).getPropertyValue('--event-color').trim();
       return {
-        title: el.dataset.kind === 'work' ? 'Ore retribuite' : el.querySelector('.pattern-kind')?.textContent || 'Registrazione',
+        title: ['ordinary', 'overtime'].includes(el.dataset.kind) ? el.querySelector('.pattern-kind')?.textContent || 'Ore' : el.querySelector('.pattern-kind')?.textContent || 'Registrazione',
         duration: {minutes: Number(el.dataset.duration || 60)},
         backgroundColor: color,
         borderColor: color,
         textColor: '#ffffff',
         extendedProps: {
           quickPattern: true,
-          entry_kind: el.dataset.kind || 'work',
+          entry_kind: el.dataset.kind || 'ordinary',
           worker_id: el.dataset.workerId,
           location_id: el.dataset.locationId,
           break_minutes: el.dataset.break,
@@ -202,6 +232,7 @@ function initExternalPatterns() {
           end_time: el.dataset.end,
           paid: el.dataset.paid === '1',
           paid_hours: el.dataset.paidHours || '',
+          rate_override: el.dataset.rateOverride || '',
           event_color: color,
         },
       };
@@ -212,7 +243,7 @@ function initExternalPatterns() {
 document.addEventListener('DOMContentLoaded', () => {
   entryKind.addEventListener('change', syncEntryKind);
   workForm.querySelector('[name=work_date]').addEventListener('change', () => {
-    if (entryKind.value !== 'work' && !workForm.querySelector('[name=end_date]').value) {
+    if (!['ordinary', 'overtime'].includes(entryKind.value) && !workForm.querySelector('[name=end_date]').value) {
       workForm.querySelector('[name=end_date]').value = workForm.querySelector('[name=work_date]').value;
     }
   });
@@ -261,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         const targetDay = localDateString(info.event.start);
         const kind = props.entry_kind || 'work';
-        if (kind === 'work') {
+        if (['ordinary', 'overtime'].includes(kind)) {
           await saveWork({
             worker_id: props.worker_id,
             location_id: props.location_id,
@@ -269,6 +300,9 @@ document.addEventListener('DOMContentLoaded', () => {
             start_time: props.start_time,
             end_time: props.end_time,
             break_minutes: props.break_minutes || 0,
+            entry_kind: kind,
+            paid: Boolean(props.paid),
+            rate_override: props.rate_override || '',
           });
         } else {
           await saveAbsence({
@@ -301,11 +335,11 @@ document.addEventListener('DOMContentLoaded', () => {
       wrap.className = isMonth ? 'calendar-event-content month-compact' : 'calendar-event-content';
       const start = arg.event.start ? timeString(arg.event.start) : '';
       const end = arg.event.end ? timeString(arg.event.end) : '';
-      const timeRange = end ? `${start}–${end}` : start;
+      const timeRange = ['vacation','sickness'].includes(props.entry_kind) ? `${props.vacation_days || props.sickness_days || ''} giorni` : (end ? `${start}–${end}` : start);
       if (isMonth) {
         wrap.innerHTML = `<b class="event-time">${timeRange}</b>`;
       } else if (props.type === 'work') {
-        wrap.innerHTML = `<b class="event-time">${timeRange}</b><span>${props.worker}</span><small>${props.employer}</small><small>${props.location}</small>`;
+        wrap.innerHTML = `<b class="event-time">${timeRange}</b><span>${props.kind_label || 'Ore ordinarie'}${props.paid === false ? ' · non retribuite' : ''}</span><small>${props.worker}</small><small>${props.employer}</small><small>${props.location}</small>`;
       } else {
         wrap.innerHTML = `<b class="event-time">${timeRange}</b><span>${props.kind_label}</span><small>${props.worker}</small><small>${props.employer}</small>`;
       }
@@ -330,7 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `Datore: ${props.employer || '—'}`,
         `Luogo: ${props.location || '—'}`,
       ] : [
-        `${props.kind_label}: ${start}${end ? `–${end}` : ''}`,
+        props.entry_kind === 'vacation' ? `Ferie: ${props.vacation_days || ''} giorni` : props.entry_kind === 'sickness' ? `Malattia: ${props.sickness_days || ''} giorni` : `${props.kind_label}: ${start}${end ? `–${end}` : ''}`,
         `Lavoratore: ${props.worker || '—'}`,
         `Datore: ${props.employer || '—'}`,
         `Periodo: ${props.start_date} → ${props.end_date} (estremi inclusi)`,
@@ -360,10 +394,12 @@ document.addEventListener('DOMContentLoaded', () => {
     delete formData.record_id;
     delete formData.entry_kind;
     try {
-      if (kind === 'work') {
+      if (['ordinary', 'overtime'].includes(kind)) {
         delete formData.end_date;
         delete formData.paid;
         delete formData.paid_hours;
+        formData.entry_kind = kind;
+        formData.paid = paidWork.checked;
         await saveWork(formData, recordId);
       } else {
         formData.kind = kind;
@@ -372,6 +408,9 @@ document.addEventListener('DOMContentLoaded', () => {
         delete formData.location_id;
         delete formData.break_minutes;
         formData.paid = document.getElementById('paidAbsence').checked;
+        formData.paid_beyond_legal_limit = workForm.querySelector('[name=paid_beyond_legal_limit]').checked;
+        formData.oncological = workForm.querySelector('[name=oncological]').checked;
+        if (['vacation','sickness'].includes(kind)) { delete formData.start_time; delete formData.end_time; delete formData.paid_hours; }
         await saveAbsence(formData, recordId);
       }
       workDialog.close();

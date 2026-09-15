@@ -1,14 +1,14 @@
 {% extends 'base.html' %}
 {% block head %}<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.19/index.global.min.css" rel="stylesheet">{% endblock %}
 {% block content %}
-<div class="page-title"><span class="eyebrow">Agenda interattiva</span><h1>Calendario attività</h1><p>Ore retribuite, ferie e malattia nello stesso calendario, con intervalli proporzionali e colori immediatamente riconoscibili.</p></div>
+<div class="page-title"><span class="eyebrow">Agenda interattiva</span><h1>Calendario attività</h1><p>Ore ordinarie, straordinarie, malattia, permessi e ferie nello stesso calendario, con intervalli proporzionali e colori immediatamente riconoscibili.</p></div>
 <div class="calendar-shell">
   <section class="card calendar-card">
     <div class="toolbar calendar-toolbar">
       <label class="compact-field">Lavoratore<select id="workerFilter"><option value="">Tutti i lavoratori</option>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
       <button type="button" onclick="openEntryModal()">+ Nuova registrazione</button>
     </div>
-    <div class="calendar-legend" aria-label="Legenda calendario"><span><i class="legend-swatch legend-work"></i> Ore retribuite: colore per datore/lavoratore/luogo</span><span><i class="legend-swatch legend-vacation"></i> Ferie</span><span><i class="legend-swatch legend-sickness"></i> Malattia</span></div>
+    <div class="calendar-legend" aria-label="Legenda calendario"><span><i class="legend-swatch legend-work"></i> Ore ordinarie/straordinarie: colore per datore/lavoratore/luogo</span><span><i class="legend-swatch legend-vacation"></i> Ferie</span><span><i class="legend-swatch legend-sickness"></i> Malattia</span></div>
     <div class="calendar-scroll" id="calendarScroll"><div id="calendar"></div></div>
   </section>
   <aside class="calendar-rail">
@@ -18,7 +18,7 @@
       <div id="recentPatterns" class="recent-patterns">
       {% for p in recent_patterns %}
         <article class="quick-pattern quick-pattern-pill" draggable="true" style="--event-color:{{p.color}}"
-          data-kind="{{p.entry_kind}}" data-worker-id="{{p.worker_id}}" data-location-id="{{p.location_id or ''}}" data-start="{{p.start_time}}" data-end="{{p.end_time}}" data-duration="{{p.duration_minutes}}" data-break="{{p.break_minutes}}" data-paid="{{1 if p.paid else 0}}" data-paid-hours="{{p.paid_hours}}"
+          data-kind="{{p.entry_kind}}" data-worker-id="{{p.worker_id}}" data-location-id="{{p.location_id or ''}}" data-start="{{p.start_time}}" data-end="{{p.end_time}}" data-duration="{{p.duration_minutes}}" data-break="{{p.break_minutes}}" data-paid="{{1 if p.paid else 0}}" data-paid-hours="{{p.paid_hours}}" data-rate-override="{{p.rate_override if p.rate_override is defined else ''}}"
           title="{{p.kind_label}} · {{p.start_time}}–{{p.end_time}} · {{p.worker_name}} · {{p.employer_name}}{% if p.location_name and p.location_name != '—' %} · {{p.location_name}}{% endif %}" tabindex="0">
           <span class="pattern-kind">{{p.kind_label}}</span>
           <span class="pattern-time"><b>{{p.start_time}}–{{p.end_time}}</b></span>
@@ -29,15 +29,15 @@
       <a class="text-link" href="/settings">⚙ Configura il numero di inserimenti rapidi</a>
     </section>
     <section class="side-card">
-      <div class="card-title"><div><span class="eyebrow">Gestione</span><h3>Ferie e malattia</h3></div><span class="badge">{{recent_absences|length}}</span></div>
+      <div class="card-title"><div><span class="eyebrow">Gestione</span><h3>Ferie, malattia e permessi</h3></div><span class="badge">{{recent_absences|length}}</span></div>
       <p class="fineprint">Le date sono sempre inclusive del primo e dell'ultimo giorno. Seleziona una registrazione per modificarla o eliminarla.</p>
       <div class="absence-list">
       {% for a in recent_absences %}
         <article class="absence-row" data-absence-id="{{a.id}}" data-worker-id="{{a.worker_id if a.worker_id is defined else ''}}">
-          <div><b>{{a.kind_label}}</b><small>{{a.worker_name}}</small><small>{{a.start_date}}{% if a.end_date != a.start_date %} → {{a.end_date}}{% endif %} · {{a.start_time}}–{{a.end_time}}</small></div>
+          <div><b>{{a.kind_label}}</b><small>{{a.worker_name}}</small><small>{{a.start_date}}{% if a.end_date != a.start_date %} → {{a.end_date}}{% endif %}{% if a.kind in ['vacation','sickness','health'] %} · {{a.days}} giorni · {{'retribuiti' if a.paid else 'non retribuiti'}}{% else %} · {{a.start_time}}–{{a.end_time}} · {{'retribuite' if a.paid else 'non retribuite'}}{% endif %}</small></div>
           <button type="button" class="icon-action edit-absence-shortcut" data-absence-id="{{a.id}}" title="Visualizza e modifica" aria-label="Visualizza e modifica {{a.kind_label}}">✎</button>
         </article>
-      {% else %}<p class="fineprint">Nessuna ferie o malattia registrata.</p>{% endfor %}
+      {% else %}<p class="fineprint">Nessuna ferie, malattia o permesso registrato.</p>{% endfor %}
       </div>
     </section>
   </aside>
@@ -48,17 +48,20 @@
     <button type="button" class="close" onclick="workDialog.close()" aria-label="Chiudi">×</button>
     <input type="hidden" name="record_id">
     <h2 id="workDialogTitle">Nuova registrazione</h2>
-    <label>Tipo<select name="entry_kind" id="entryKind" required><option value="work">Ore retribuite</option><option value="vacation">Ferie</option><option value="sickness">Malattia</option></select></label>
+    <label>Tipo<select name="entry_kind" id="entryKind" required><option value="ordinary">Ore ordinarie</option><option value="overtime">Ore straordinarie</option><option value="sickness">Malattia (giorni)</option><option value="permit">Ore permesso</option><option value="vacation">Ferie (giorni)</option></select></label>
     <label>Lavoratore<select name="worker_id" required>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
     <div class="formgrid date-fields"><label>Data iniziale<input type="date" name="work_date" required></label><label id="endDateField" class="hidden">Data finale inclusa<input type="date" name="end_date"></label></div>
-    <div class="formgrid"><label>Inizio<input type="time" name="start_time" required value="09:00"></label><label>Fine<input type="time" name="end_time" required value="13:00"></label></div>
+    <div class="formgrid" id="timeFields"><label>Inizio<input type="time" name="start_time" required value="09:00"></label><label>Fine<input type="time" name="end_time" required value="13:00"></label></div>
     <div id="workOnlyFields">
       <label>Luogo<select name="location_id"><option value="">Seleziona un luogo</option>{% for location in locations %}<option value="{{location.id}}">{{location.name}}{% if location.address %} — {{location.address}}{% endif %}</option>{% endfor %}</select></label>
       <label>Pausa (minuti)<input type="number" min="0" name="break_minutes" value="0"></label>
+      <label class="check"><input type="checkbox" name="paid_work" id="paidWork" checked> Retribuite</label>
+      <label id="overtimeRateField" class="hidden">Tariffa straordinaria (€ / ora) <small>Vuoto = tariffa oraria vigente.</small><input type="number" min="0" step=".01" name="rate_override"></label>
     </div>
     <div id="absenceOnlyFields" class="hidden">
+      <label id="permitCategoryField" class="hidden">Categoria permesso<select name="permit_category" id="permitCategory">{% for code,label in permit_categories.items() %}<option value="{{code}}">{{label}}</option>{% endfor %}</select><small>Le categorie retribuite sono validate rispetto al monte previsto dal CCNL vigente per la data.</small></label>
       <label class="check"><input type="checkbox" name="paid" id="paidAbsence"> Retribuita</label>
-      <label>Ore pagate totali <small>Lascia vuoto per calcolo automatico dall'intervallo inserito.</small><input type="number" min="0" step=".01" name="paid_hours"></label>
+      <label id="absenceHoursField">Ore della registrazione <small>Vuoto = calcolo automatico dall'intervallo inserito.</small><input type="number" min="0" step=".01" name="paid_hours"></label><p id="vacationDaysNote" class="fineprint hidden">Le ferie sono sempre contabilizzate ed esposte in giorni; gli orari non si applicano.</p><p id="sicknessDaysNote" class="fineprint hidden">La malattia è sempre contabilizzata in giorni di calendario. La retribuzione contrattuale è calcolata automaticamente in base all'anzianità e alla regola vigente per la data.</p><label id="oncologicalField" class="check hidden"><input type="checkbox" name="oncological"> Malattia oncologica documentata</label><label id="legalOverrideField" class="check hidden"><input type="checkbox" name="paid_beyond_legal_limit"> Trattamento di miglior favore: retribuisci anche oltre il limite contrattuale</label>
     </div>
     <label>Note<textarea name="notes" rows="3"></textarea></label>
     <div class="dialog-actions"><button id="saveWorkButton">Salva</button><button type="button" id="deleteWorkButton" class="danger hidden" title="Elimina registrazione">🗑</button></div>

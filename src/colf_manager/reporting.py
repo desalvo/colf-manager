@@ -331,14 +331,65 @@ def _signature_story(worker, employer, styles, approval=None):
     story.append(table)
     return story
 
-def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fiscal=None, expenses=None, title="Cedolino mensile gestionale", approval=None, payments=None):
+def _permit_story(permits, styles):
+    permits = list(permits or [])
+    if not permits:
+        return []
+    rows = [["Categoria permesso", "Retr. mese", "Retr. anno", "Miglior favore", "Non retr. anno", "Residuo"]]
+    for item in permits:
+        remaining = "—" if item.get("remaining") is None else f"{item['remaining']} h"
+        rows.append([
+            item.get("label", item.get("category", "—")),
+            f"{item.get('paid_month', 0)} h",
+            f"{item.get('paid_year', 0)} h",
+            f"{item.get('extra_paid_year', 0)} h",
+            f"{item.get('unpaid_year', 0)} h",
+            remaining,
+        ])
+    table = Table(rows, colWidths=[46*mm, 22*mm, 22*mm, 22*mm, 22*mm, 22*mm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]),
+        ("GRID", (0, 0), (-1, -1), 0.3, LINE),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+        ("PADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return [Paragraph("Permessi", styles["CMSub"]), table, Paragraph("Le categorie del monte personale ex art. 19 condividono lo stesso plafond; lutto e nascita sono diritti per evento.", styles["CMNote"])]
+
+
+def _sickness_story(sickness, styles):
+    if not sickness:
+        return []
+    if not sickness.get("known", True):
+        return [Paragraph("Malattia", styles["CMSub"]), Paragraph("Regola storica non codificata per il periodo selezionato.", styles["CMNote"])]
+    rows = [
+        ["Malattia", "Giorni"],
+        ["Totale nel mese", str(sickness.get("total_month", 0))],
+        ["Retribuiti nel mese", str(sickness.get("paid_month", 0))],
+        ["Totale nell’anno", str(sickness.get("total_year", 0))],
+        ["Retribuiti nell’anno", str(sickness.get("paid_year", 0))],
+        ["Non retribuiti", str(sickness.get("total_year", 0) - sickness.get("paid_year", 0))],
+        ["Limite contrattuale retribuito", str(sickness.get("paid_days_limit", 0))],
+        ["Residuo contrattuale", str(sickness.get("legal_paid_remaining", 0))],
+        ["Pagati oltre limite per miglior favore", str(sickness.get("extra_paid_year", 0))],
+        ["Conservazione posto - limite", str(sickness.get("job_protection_days", 0))],
+        ["Conservazione posto usata negli ultimi 365 giorni", str(sickness.get("job_protection_used_365", 0))],
+        ["Conservazione posto residua negli ultimi 365 giorni", str(sickness.get("job_protection_remaining_365", 0))],
+    ]
+    return [Paragraph("Malattia", styles["CMSub"]), _kv_table(rows), Paragraph(str(sickness.get("source", "")), styles["CMNote"])]
+
+def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fiscal=None, expenses=None, title="Cedolino mensile gestionale", approval=None, payments=None, permits=None, sickness=None):
     out, doc = _doc(title)
     s = _styles()
     story = [Paragraph(title, s["CMTitle"]), Paragraph(f"Periodo {month:02d}/{year}", s["CMSub"]), _party_block(worker, employer, s), Spacer(1, 7)]
-    rows = [["Voce", "Valore"], ["Ore lavorate", str(summary["worked_hours"])], ["Retribuzione ore", _money(summary["worked_pay"])], ["Assenze retribuite / ferie / malattia", _money(summary["paid_absence"])], ["Anticipi lavoratore da rimborsare", _money(summary["worker_advances"])], ["Anticipi datore da recuperare", _money(summary["employer_advances"])], ["Rettifica netta spese/anticipi", _money(summary["reimbursements"])], ["Retribuzione registrata", _money(summary["gross"])], ["Quota tredicesima maturata (stima)", _money(summary.get("thirteenth_accrual", 0))], ["Quota TFR maturata (stima)", _money(summary["tfr_accrual"])], ["Totale da corrispondere", _money(summary["payable"])]]
+    rows = [["Voce", "Valore"], ["Ore totali registrate", str(summary["worked_hours"])], ["Ore ordinarie", str(summary.get("ordinary_hours", 0))], ["Ore straordinarie", str(summary.get("overtime_hours", 0))], ["Ore non retribuite", str(summary.get("unpaid_work_hours", 0))], ["Retribuzione ore", _money(summary["worked_pay"])], ["Malattia / permessi / ferie retribuiti", _money(summary["paid_absence"])], ["Anticipi lavoratore da rimborsare", _money(summary["worker_advances"])], ["Anticipi datore da recuperare", _money(summary["employer_advances"])], ["Rettifica netta spese/anticipi", _money(summary["reimbursements"])], ["Retribuzione registrata", _money(summary["gross"])], ["Quota tredicesima maturata (stima)", _money(summary.get("thirteenth_accrual", 0))], ["Quota TFR maturata (stima)", _money(summary["tfr_accrual"])], ["Totale da corrispondere", _money(summary["payable"])]]
     story.append(_kv_table(rows))
     if vacation:
         story += [Paragraph("Ferie", s["CMSub"]), _kv_table([["Situazione ferie", "Giorni"],["Maturate alla data", str(vacation["accrued"])],["Proiezione fine anno", str(vacation["projected"])],["Godute/programmate", str(vacation["used_scheduled"])],["Disponibili secondo impostazione", str(vacation["available_usable"])]])]
+    story += _sickness_story(sickness, s)
+    story += _permit_story(permits, s)
     story += _expense_story(expenses, s, date(year, month, monthrange(year, month)[1]))
     story += _fiscal_story(fiscal, s)
     story += _payment_story(payments, s, summary.get("payable"), due_types={"salary"})
@@ -349,16 +400,18 @@ def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fisc
     return out
 
 
-def annual_payroll_pdf(worker, employer, annual, year, vacation, fiscal=None, expenses=None, approval=None, payments=None):
+def annual_payroll_pdf(worker, employer, annual, year, vacation, fiscal=None, expenses=None, approval=None, payments=None, permits=None, sickness=None):
     out, doc = _doc("Cedolino globale annuale")
     s = _styles()
     story=[Paragraph("Cedolino globale annuale", s["CMTitle"]), Paragraph(str(year), s["CMSub"]), _party_block(worker, employer, s), Spacer(1,7)]
-    rows=[["Mese","Ore","Retribuzione","Assenze","Spese nette","Da corrispondere"]]
+    rows=[["Mese","Ore","Retribuzione","Malattia/permessi/ferie","Spese nette","Da corrispondere"]]
     for i, m in enumerate(annual["months"], 1):
         rows.append([f"{i:02d}", str(m["worked_hours"]), _money(m["worked_pay"]), _money(m["paid_absence"]), _money(m["reimbursements"]), _money(m["payable"])])
     t=Table(rows,colWidths=[15*mm,25*mm,31*mm,31*mm,30*mm,32*mm],repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),BRAND),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,PALE]),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#c8d8d2")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("FONTSIZE",(0,0),(-1,-1),7.2),("PADDING",(0,0),(-1,-1),4)]))
     story += [t, Paragraph("Totali annuali",s["CMSub"]), _kv_table([["Voce","Valore"],["Ore",str(annual["worked_hours"])],["Retribuzione registrata",_money(annual["gross"])],["Quota tredicesima maturata",_money(annual["thirteenth_accrual"])],["TFR maturato",_money(annual["tfr_accrual"])],["Totale corrispondibile registrato",_money(annual["payable"])]]), Paragraph("Ferie annuali",s["CMSub"]), _kv_table([["Ferie","Giorni"],["Maturate",str(vacation["accrued"])],["Maturabili entro 31/12",str(vacation["projected"])],["Godute/programmate",str(vacation["used_scheduled"])],["Disponibili",str(vacation["available_usable"])]]), Spacer(1,8), Paragraph("Prospetto gestionale annuale; non sostituisce gli adempimenti ufficiali.",s["CMNote"])]
+    story += _sickness_story(sickness, s)
+    story += _permit_story(permits, s)
     story += _expense_story(expenses, s, date(year, 12, 31))
     story += _fiscal_story(fiscal, s)
     story += _payment_story(payments, s, annual.get("payable"), due_types={"salary"})
@@ -395,7 +448,7 @@ def tfr_annual_pdf(worker, employer, tfr, year, rule_notes, fiscal=None, approva
     return out
 
 
-def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approval=None, payments=None):
+def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approval=None, payments=None, permits=None, sickness=None):
     out,doc=_doc("Andamento ore e retribuzioni")
     s=_styles()
     story=[Paragraph("Andamento ore e retribuzioni",s["CMTitle"]),Paragraph(str(year),s["CMSub"]),_party_block(worker,employer,s),Spacer(1,8)]
@@ -423,6 +476,8 @@ def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approv
     story += _expense_story(expenses, s, date(year, 12, 31))
     story += _fiscal_story(fiscal, s)
     story += _payment_story(payments, s)
+    story += _sickness_story(sickness, s)
+    story += _permit_story(permits, s)
     story += _signature_story(worker, employer, s, approval)
     doc.build(story,onFirstPage=_footer,onLaterPages=_footer)
     out.seek(0)

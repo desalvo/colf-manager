@@ -101,9 +101,9 @@ Local packaged photographic assets are bundled in `src/colf_manager/static/heroe
 ## Novità r32: approvazione e firme nei report
 I report possono includere una sezione di approvazione con firma del lavoratore, del datore di lavoro, di entrambi oppure nessuna firma. I nomi sono precompilati automaticamente. Luogo e data sono modificabili prima della generazione; la data proposta è quella di generazione del report. Le informazioni di firma vengono incorporate nel PDF archiviato. Gli hero e gli elementi fotografici locali restano inclusi nel pacchetto in `src/colf_manager/static/heroes/`.
 
-## Calendario: ore, ferie e malattia
+## Calendario: ore ordinarie, straordinarie, malattia, permessi e ferie
 
-Dalla r37 la stessa finestra del calendario consente di scegliere **Ore retribuite**, **Ferie** o **Malattia**. Ferie e malattia sono registrate come intervalli orari e possono coesistere nello stesso giorno con ore retribuite. Per periodi di più giorni, la data iniziale e finale sono sempre comprese. Le ferie sono mostrate in colore dedicato, la malattia in un secondo colore dedicato; le ore retribuite mantengono un colore stabile determinato dalla combinazione datore/lavoratore/luogo. Cliccando un intervallo è possibile visualizzarlo, modificarlo o eliminarlo.
+Dalla r62 il calendario distingue **Ore ordinarie**, **Ore straordinarie**, **Malattia**, **Ore permesso** e **Ferie**. Ordinarie e straordinarie sono retribuite per default ma possono essere marcate non retribuite. Le straordinarie usano automaticamente la tariffa oraria vigente alla data della registrazione; è possibile indicare una tariffa diversa valida esclusivamente per quella registrazione. Malattia e permesso sono retribuiti per default e possono essere marcati non retribuiti. Le ferie non sono una tipologia di ore: vengono registrate, mostrate e rendicontate esclusivamente in **giorni**, senza orario di inizio/fine.
 
 ## Novità r42: drag & drop e andamento ore per luogo
 
@@ -113,7 +113,7 @@ Nella pagina Report, quando è presente un solo lavoratore questo viene selezion
 
 ### Indicatori malattia in Panoramica
 
-La Panoramica mostra, per il mese selezionato, le ore di malattia retribuita e non retribuita registrate. Mostra inoltre il residuo annuo retribuibile. Il CCNL esprime il massimale in giorni (8, 10 o 15 in funzione dell’anzianità); l’app converte il residuo in ore usando l’orario settimanale diviso per 6. Per periodi non coperti dalle regole contrattuali verificate il valore è mostrato come N/D.
+La Panoramica mostra, per il mese selezionato, le ore malattia retribuite e non retribuite registrate. Mostra inoltre il residuo annuo retribuibile. Il CCNL esprime il massimale in giorni (8, 10 o 15 in funzione dell’anzianità); l’app converte il residuo in ore usando l’orario settimanale diviso per 6. Per periodi non coperti dalle regole contrattuali verificate il valore è mostrato come N/D.
 
 
 ## Novità r47: indirizzi, panoramica ed export
@@ -123,7 +123,7 @@ Lavoratori e datori dispongono ora dei campi Città, Provincia e CAP. Nei report
 
 ## Novità r48: sottoscrizioni calendario e impostazioni
 
-In **Impostazioni** è possibile configurare la URL esterna dell'applicazione e attivare una sottoscrizione in sola lettura per il calendario di un singolo lavoratore o di un datore di lavoro. Per ogni calendario attivato vengono mostrati un link **ICS** e un endpoint **CalDAV** protetti da token casuale revocabile. Il calendario del datore aggrega gli eventi dei lavoratori associati. I feed includono ore retribuite, ferie e malattia. Il cambio password personale è ora integrato nella stessa pagina Impostazioni.
+In **Impostazioni** è possibile configurare la URL esterna dell'applicazione e attivare una sottoscrizione in sola lettura per il calendario di un singolo lavoratore o di un datore di lavoro. Per ogni calendario attivato vengono mostrati un link **ICS** e un endpoint **CalDAV** protetti da token casuale revocabile. Il calendario del datore aggrega gli eventi dei lavoratori associati. I feed includono ore ordinarie, straordinarie, malattia, permessi e ferie in giorni. Il cambio password personale è ora integrato nella stessa pagina Impostazioni.
 
 ## Firme grafiche nei report
 Nelle anagrafiche di lavoratore e datore di lavoro è possibile caricare una firma grafica in formato PNG, JPEG, TIFF, WEBP o BMP. Quando il report prevede la firma del soggetto e la firma è registrata, l'immagine viene apposta automaticamente nello spazio firma; in assenza del file resta la linea per la firma manuale. Tutti i PDF riportano inoltre logo di colf-manager, versione/build e autore.
@@ -135,3 +135,28 @@ La generazione del cedolino mensile crea automaticamente una voce residua Da pag
 
 ## Archivio report e backup
 Dopo la generazione da interfaccia, la pagina Report viene aggiornata automaticamente e il nuovo documento compare subito nell'archivio. I report archiviati possono essere visualizzati nel browser, scaricati, inviati via e-mail o eliminati. L'export completo include database, documenti, report, firme grafiche, pagamenti e relativi allegati; l'import completo ripristina gli stessi elementi e i collegamenti fra loro.
+
+
+## Novità r60: modello completo delle tipologie di ore
+
+Le registrazioni di lavoro distinguono ora ore ordinarie e straordinarie. Ogni registrazione ha una flag retribuita/non retribuita; il valore predefinito è retribuita. Le ore straordinarie usano la tariffa vigente, con override opzionale applicato soltanto a quella registrazione. I riepiloghi e i cedolini distinguono ore totali, ordinarie, straordinarie e lavoro non retribuito.
+
+Nella r60 la precedente voce **Malattia** era stata temporaneamente rinominata **Salute**; la r62 ripristina la dicitura **Malattia**. È stata aggiunta **Ore permesso**, retribuita per default e modificabile come non retribuita.
+
+Le **Ferie** restano un istituto espresso in giorni: l'interfaccia non richiede orari, il calendario le visualizza come eventi giornalieri e report/panoramica le espongono sempre in giorni. L'eventuale conversione tecnica necessaria al calcolo economico non viene presentata come monte ore ferie.
+
+
+## Novità r61: permessi contrattuali per categoria
+
+L'anagrafica del lavoratore registra ora se il rapporto è **convivente** e, quando applicabile, se rientra nel regime di convivenza a orario ridotto dell'art. 14(2) del CCNL. È inoltre possibile indicare la carica in un organismo direttivo sindacale ai fini dei permessi previsti dal contratto.
+
+I permessi sono classificati in: visite mediche documentate, rinnovo del permesso di soggiorno, ricongiungimento familiare, assistenza a familiari con grave disabilità certificata, lutto/comprovata disgrazia familiare, nascita di un figlio per il padre, formazione professionale, formazione Ebincolf e permessi sindacali. Per i permessi **non retribuiti** è disponibile anche la categoria **Altro**.
+
+Il motore applica le regole in base alla data. Nel CCNL in vigore dal 1 novembre 2025 il monte comune dell'art. 19 è pari a 16 ore annue per i conviventi, 12 ore per i conviventi nel regime ridotto art. 14(2), 12 ore per i non conviventi con almeno 30 ore settimanali e viene riproporzionato sotto le 30 ore. Visite mediche, rinnovo del permesso di soggiorno, ricongiungimento familiare e assistenza a familiari con grave disabilità condividono tale monte retribuito. La formazione richiede tempo pieno, contratto a tempo indeterminato e almeno 6 mesi di anzianità nel CCNL 2025-2028; per il periodo precedente il motore applica il requisito di 12 mesi.
+
+Lutto e nascita restano diritti per evento, senza un falso plafond annuo. L'overview, in sezioni chiuse per default, mostra uso retribuito/non retribuito, disponibilità e residui; i report pertinenti riportano gli stessi dati.
+
+
+## Novità r62: malattia in giorni e indicatori visuali
+
+La malattia è ora registrata esclusivamente in giorni di calendario, senza orari. Il motore seleziona la regola contrattuale vigente per la data: limiti di conservazione del posto e giorni retribuibili sono distinti, con 50% fino al terzo giorno consecutivo e 100% dal quarto. Il datore può autorizzare un trattamento di miglior favore e retribuire giorni di malattia o ore di permesso oltre il limite contrattuale; l'eccedenza resta separata dal diritto residuo. Ogni indicatore dell'overview ha un'icona e, quando esiste un limite, una codifica visuale del livello rispetto alla soglia.

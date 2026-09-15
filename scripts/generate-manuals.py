@@ -73,7 +73,7 @@ def build(lang):
             fontSize=15,
             leading=18,
             textColor=colors.HexColor("#287d70"),
-            spaceBefore=3 * mm,
+            spaceBefore=2.5 * mm,
             spaceAfter=1 * mm,
             keepWithNext=True,
         )
@@ -82,11 +82,11 @@ def build(lang):
         ParagraphStyle(
             name="CMBody",
             parent=styles["BodyText"],
-            fontSize=9,
-            leading=11.5,
+            fontSize=8.5,
+            leading=10.6,
             textColor=colors.HexColor("#263c37"),
             alignment=TA_LEFT,
-            spaceAfter=1.2 * mm,
+            spaceAfter=0.9 * mm,
         )
     )
     styles.add(

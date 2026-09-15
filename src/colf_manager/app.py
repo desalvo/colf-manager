@@ -1611,6 +1611,11 @@ def create_app(test_config=None):
             # ignored. Equivalent payroll hours are derived internally from the
             # worker schedule and never change the number of sickness days.
             paid_hours = vacation_hours_per_day(worker) * duration
+        elif kind == "permit":
+            # Permit hours are always derived from start/end time. Ignore any
+            # legacy/manual paid_hours value so stored hours cannot diverge
+            # from the event interval shown in the calendar.
+            paid_hours = duration * Decimal((end_date - start_date).days + 1)
         elif paid_hours_raw not in (None, ""):
             paid_hours = nonnegative_decimal(paid_hours_raw, "Ore pagate")
         else:

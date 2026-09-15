@@ -1,150 +1,187 @@
-.env.example	490
-.gitattributes	78
-.github/workflows/ci.yml	4189
-.github/workflows/codeql.yml	448
-.github/workflows/release.yml	1880
-.gitignore	85
-APPLY.md	438
-CHANGELOG.md	18191
-Dockerfile	1702
-LICENSE	286
-POSTGRESQL-18-UPGRADE.it.md	1404
-POSTGRESQL-18-UPGRADE.md	1321
-README.it.md	8647
-README.md	9416
-SECURITY.md	317
-VERSION	9
-docker-compose.yml	2017
-docs/ARCHITECTURE.md	2762
-docs/LEGAL-RULES.en.md	1132
-docs/LEGAL-RULES.it.md	3241
-docs/MANUAL.en.md	16017
-docs/MANUAL.it.md	17336
-docs/R60-HOUR-TYPES.en.md	444
-docs/R60-HOUR-TYPES.it.md	567
-docs/R61-PERMITS.en.md	271
-docs/R61-PERMITS.it.md	335
-docs/R62-SICKNESS-DAYS-INDICATORS.en.md	977
-docs/R62-SICKNESS-DAYS-INDICATORS.it.md	1035
-kubernetes/README.it.md	3771
-kubernetes/README.md	3884
-kubernetes/application.yaml	2997
-kubernetes/backup.yaml	1836
-kubernetes/database.yaml	2251
-kubernetes/ingress.yaml	544
-kubernetes/kustomization.yaml	311
-kubernetes/maintenance.yaml	2563
-kubernetes/namespace.yaml	62
-kubernetes/network-policy.yaml	720
-kubernetes/pvc-application.yaml	328
-kubernetes/pvc-database.yaml	671
-kubernetes/secret-application.yaml	235
-kubernetes/secret-database.yaml	168
-migrations/README	579
-migrations/alembic.ini	531
-migrations/env.py	962
-migrations/script.py.mako	452
-migrations/versions/1000_hardened_baseline.py	471
-migrations/versions/1001_employers_vacation_reports.py	2436
-migrations/versions/1002_contract_tax_reporting.py	1542
-migrations/versions/1003_locations.py	2701
-migrations/versions/1004_generated_reports.py	1572
-migrations/versions/1005_person_address_fields.py	1702
-migrations/versions/1006_signatures_payments.py	4025
-migrations/versions/1007_expense_settlements.py	2296
-migrations/versions/1008_expense_recovery_allocations.py	1708
-migrations/versions/1009_hour_types_health_permits.py	1863
-migrations/versions/1010_permit_categories_live_in.py	1597
-migrations/versions/1011_sickness_days_and_employer_override.py	1246
-output/pdf/colf-manager-manual-v1.0.0-en.pdf	64805
-output/pdf/colf-manager-manual-v1.0.0-it.pdf	65385
-pyproject.toml	1238
-scripts/build-package.sh	830
-scripts/check-all.sh	367
-scripts/check-local.sh	1196
-scripts/compose-config-check.sh	314
-scripts/generate-manuals.py	4356
-scripts/k8s-delete-application-pvc.sh	131
-scripts/k8s-delete-application.sh	127
-scripts/k8s-delete-database-pvc.sh	206
-scripts/k8s-delete-database.sh	124
-scripts/k8s-install.sh	518
-scripts/prepare-local-checks.sh	1182
-scripts/production-gate.sh	4786
-scripts/recreate-venv.sh	277
-scripts/release-check.sh	487
-src/colf_manager/__init__.py	118
-src/colf_manager/app.py	165546
-src/colf_manager/backup.py	9120
-src/colf_manager/calculations.py	24220
-src/colf_manager/mailer.py	1787
-src/colf_manager/maintenance.py	1152
-src/colf_manager/models.py	13561
-src/colf_manager/permit_rules.py	14622
-src/colf_manager/reporting.py	33389
-src/colf_manager/sickness_rules.py	5562
-src/colf_manager/static/calendar.js	20609
-src/colf_manager/static/heroes/archive-admin-title.png	1433704
-src/colf_manager/static/heroes/calendar-title.png	1594128
-src/colf_manager/static/heroes/change-password-title.png	1330822
-src/colf_manager/static/heroes/dashboard-hero-photo.png	1964738
-src/colf_manager/static/heroes/dashboard-title.png	1794039
-src/colf_manager/static/heroes/documents-title.png	1646082
-src/colf_manager/static/heroes/employer-detail-title.png	1945191
-src/colf_manager/static/heroes/employer-edit-title.png	1885225
-src/colf_manager/static/heroes/employers-title.png	1980889
-src/colf_manager/static/heroes/expense-edit-title.png	1488783
-src/colf_manager/static/heroes/expenses-title.png	1709728
-src/colf_manager/static/heroes/location-detail-title.png	1742469
-src/colf_manager/static/heroes/location-edit-title.png	1694864
-src/colf_manager/static/heroes/locations-title.png	1951008
-src/colf_manager/static/heroes/login-background.png	1932431
-src/colf_manager/static/heroes/mail-compose-title.png	1477675
-src/colf_manager/static/heroes/rate-edit-title.png	1576390
-src/colf_manager/static/heroes/rates-title.png	1797455
-src/colf_manager/static/heroes/reports-title.png	1727851
-src/colf_manager/static/heroes/settings-title.png	1543091
-src/colf_manager/static/heroes/users-admin-title.png	1777535
-src/colf_manager/static/heroes/worker-detail-title.png	1530084
-src/colf_manager/static/heroes/worker-edit-title.png	1392697
-src/colf_manager/static/heroes/workers-title.png	1555164
-src/colf_manager/static/logo.png	57413
-src/colf_manager/static/logo.svg	1839
-src/colf_manager/static/style.css	42086
-src/colf_manager/storage.py	3736
-src/colf_manager/templates/archive_admin.html	1814
-src/colf_manager/templates/base.html	6775
-src/colf_manager/templates/calendar.html	8219
-src/colf_manager/templates/change_password.html	775
-src/colf_manager/templates/dashboard.html	9300
-src/colf_manager/templates/documents.html	2029
-src/colf_manager/templates/employer_detail.html	1896
-src/colf_manager/templates/employer_edit.html	1878
-src/colf_manager/templates/employers.html	2447
-src/colf_manager/templates/expense_detail.html	5037
-src/colf_manager/templates/expense_edit.html	1497
-src/colf_manager/templates/expense_settlement_edit.html	1139
-src/colf_manager/templates/expenses.html	2615
-src/colf_manager/templates/location_detail.html	1509
-src/colf_manager/templates/location_edit.html	675
-src/colf_manager/templates/locations.html	1501
-src/colf_manager/templates/login.html	764
-src/colf_manager/templates/mail_compose.html	1091
-src/colf_manager/templates/payment_detail.html	1882
-src/colf_manager/templates/payment_edit.html	2401
-src/colf_manager/templates/payments.html	4138
-src/colf_manager/templates/rate_edit.html	925
-src/colf_manager/templates/rates.html	1895
-src/colf_manager/templates/reports.html	9063
-src/colf_manager/templates/settings.html	6979
-src/colf_manager/templates/users.html	1032
-src/colf_manager/templates/worker_detail.html	4127
-src/colf_manager/templates/worker_edit.html	3872
-src/colf_manager/templates/workers.html	4896
-src/colf_manager/validation.py	1902
-tests/test_app.py	39447
-tests/test_backup_storage.py	8876
-tests/test_payments.py	3006
-tests/test_permits.py	2351
-tests/test_sickness.py	1826
-tests/test_validation.py	2519
+.env.example
+.gitattributes
+.github/workflows/ci.yml
+.github/workflows/codeql.yml
+.github/workflows/release.yml
+.gitignore
+.pytest_cache/.gitignore
+.pytest_cache/CACHEDIR.TAG
+.pytest_cache/README.md
+.pytest_cache/v/cache/lastfailed
+.pytest_cache/v/cache/nodeids
+APPLY.md
+CHANGELOG.md
+Dockerfile
+LICENSE
+POSTGRESQL-18-UPGRADE.it.md
+POSTGRESQL-18-UPGRADE.md
+README.it.md
+README.md
+SECURITY.md
+VERSION
+docker-compose.yml
+docs/ARCHITECTURE.md
+docs/LEGAL-RULES.en.md
+docs/LEGAL-RULES.it.md
+docs/MANUAL.en.md
+docs/MANUAL.it.md
+docs/R60-HOUR-TYPES.en.md
+docs/R60-HOUR-TYPES.it.md
+docs/R61-PERMITS.en.md
+docs/R61-PERMITS.it.md
+docs/R62-SICKNESS-DAYS-INDICATORS.en.md
+docs/R62-SICKNESS-DAYS-INDICATORS.it.md
+kubernetes/README.it.md
+kubernetes/README.md
+kubernetes/application.yaml
+kubernetes/backup.yaml
+kubernetes/database.yaml
+kubernetes/ingress.yaml
+kubernetes/kustomization.yaml
+kubernetes/maintenance.yaml
+kubernetes/namespace.yaml
+kubernetes/network-policy.yaml
+kubernetes/pvc-application.yaml
+kubernetes/pvc-database.yaml
+kubernetes/secret-application.yaml
+kubernetes/secret-database.yaml
+migrations/README
+migrations/__pycache__/env.cpython-313.pyc
+migrations/alembic.ini
+migrations/env.py
+migrations/script.py.mako
+migrations/versions/1000_hardened_baseline.py
+migrations/versions/1001_employers_vacation_reports.py
+migrations/versions/1002_contract_tax_reporting.py
+migrations/versions/1003_locations.py
+migrations/versions/1004_generated_reports.py
+migrations/versions/1005_person_address_fields.py
+migrations/versions/1006_signatures_payments.py
+migrations/versions/1007_expense_settlements.py
+migrations/versions/1008_expense_recovery_allocations.py
+migrations/versions/1009_hour_types_health_permits.py
+migrations/versions/1010_permit_categories_live_in.py
+migrations/versions/1011_sickness_days_and_employer_override.py
+migrations/versions/__pycache__/1000_hardened_baseline.cpython-313.pyc
+migrations/versions/__pycache__/1001_employers_vacation_reports.cpython-313.pyc
+migrations/versions/__pycache__/1002_contract_tax_reporting.cpython-313.pyc
+migrations/versions/__pycache__/1003_locations.cpython-313.pyc
+migrations/versions/__pycache__/1004_generated_reports.cpython-313.pyc
+migrations/versions/__pycache__/1005_person_address_fields.cpython-313.pyc
+migrations/versions/__pycache__/1006_signatures_payments.cpython-313.pyc
+migrations/versions/__pycache__/1007_expense_settlements.cpython-313.pyc
+migrations/versions/__pycache__/1008_expense_recovery_allocations.cpython-313.pyc
+migrations/versions/__pycache__/1009_hour_types_health_permits.cpython-313.pyc
+migrations/versions/__pycache__/1010_permit_categories_live_in.cpython-313.pyc
+migrations/versions/__pycache__/1011_sickness_days_and_employer_override.cpython-313.pyc
+output/pdf/colf-manager-manual-v1.0.0-en.pdf
+output/pdf/colf-manager-manual-v1.0.0-it.pdf
+pyproject.toml
+scripts/build-package.sh
+scripts/check-all.sh
+scripts/check-local.sh
+scripts/compose-config-check.sh
+scripts/generate-manuals.py
+scripts/k8s-delete-application-pvc.sh
+scripts/k8s-delete-application.sh
+scripts/k8s-delete-database-pvc.sh
+scripts/k8s-delete-database.sh
+scripts/k8s-install.sh
+scripts/prepare-local-checks.sh
+scripts/production-gate.sh
+scripts/recreate-venv.sh
+scripts/release-check.sh
+src/colf_manager/__init__.py
+src/colf_manager/__pycache__/__init__.cpython-313.pyc
+src/colf_manager/__pycache__/app.cpython-313.pyc
+src/colf_manager/__pycache__/backup.cpython-313.pyc
+src/colf_manager/__pycache__/calculations.cpython-313.pyc
+src/colf_manager/__pycache__/mailer.cpython-313.pyc
+src/colf_manager/__pycache__/maintenance.cpython-313.pyc
+src/colf_manager/__pycache__/models.cpython-313.pyc
+src/colf_manager/__pycache__/permit_rules.cpython-313.pyc
+src/colf_manager/__pycache__/reporting.cpython-313.pyc
+src/colf_manager/__pycache__/sickness_rules.cpython-313.pyc
+src/colf_manager/__pycache__/storage.cpython-313.pyc
+src/colf_manager/__pycache__/validation.cpython-313.pyc
+src/colf_manager/app.py
+src/colf_manager/backup.py
+src/colf_manager/calculations.py
+src/colf_manager/mailer.py
+src/colf_manager/maintenance.py
+src/colf_manager/models.py
+src/colf_manager/permit_rules.py
+src/colf_manager/reporting.py
+src/colf_manager/sickness_rules.py
+src/colf_manager/static/calendar.js
+src/colf_manager/static/heroes/archive-admin-title.png
+src/colf_manager/static/heroes/calendar-title.png
+src/colf_manager/static/heroes/change-password-title.png
+src/colf_manager/static/heroes/dashboard-hero-photo.png
+src/colf_manager/static/heroes/dashboard-title.png
+src/colf_manager/static/heroes/documents-title.png
+src/colf_manager/static/heroes/employer-detail-title.png
+src/colf_manager/static/heroes/employer-edit-title.png
+src/colf_manager/static/heroes/employers-title.png
+src/colf_manager/static/heroes/expense-edit-title.png
+src/colf_manager/static/heroes/expenses-title.png
+src/colf_manager/static/heroes/location-detail-title.png
+src/colf_manager/static/heroes/location-edit-title.png
+src/colf_manager/static/heroes/locations-title.png
+src/colf_manager/static/heroes/login-background.png
+src/colf_manager/static/heroes/mail-compose-title.png
+src/colf_manager/static/heroes/rate-edit-title.png
+src/colf_manager/static/heroes/rates-title.png
+src/colf_manager/static/heroes/reports-title.png
+src/colf_manager/static/heroes/settings-title.png
+src/colf_manager/static/heroes/users-admin-title.png
+src/colf_manager/static/heroes/worker-detail-title.png
+src/colf_manager/static/heroes/worker-edit-title.png
+src/colf_manager/static/heroes/workers-title.png
+src/colf_manager/static/logo.png
+src/colf_manager/static/logo.svg
+src/colf_manager/static/style.css
+src/colf_manager/storage.py
+src/colf_manager/templates/archive_admin.html
+src/colf_manager/templates/base.html
+src/colf_manager/templates/calendar.html
+src/colf_manager/templates/change_password.html
+src/colf_manager/templates/dashboard.html
+src/colf_manager/templates/documents.html
+src/colf_manager/templates/employer_detail.html
+src/colf_manager/templates/employer_edit.html
+src/colf_manager/templates/employers.html
+src/colf_manager/templates/expense_detail.html
+src/colf_manager/templates/expense_edit.html
+src/colf_manager/templates/expense_settlement_edit.html
+src/colf_manager/templates/expenses.html
+src/colf_manager/templates/location_detail.html
+src/colf_manager/templates/location_edit.html
+src/colf_manager/templates/locations.html
+src/colf_manager/templates/login.html
+src/colf_manager/templates/mail_compose.html
+src/colf_manager/templates/payment_detail.html
+src/colf_manager/templates/payment_edit.html
+src/colf_manager/templates/payments.html
+src/colf_manager/templates/rate_edit.html
+src/colf_manager/templates/rates.html
+src/colf_manager/templates/reports.html
+src/colf_manager/templates/settings.html
+src/colf_manager/templates/users.html
+src/colf_manager/templates/worker_detail.html
+src/colf_manager/templates/worker_edit.html
+src/colf_manager/templates/workers.html
+src/colf_manager/validation.py
+tests/__pycache__/test_app.cpython-313-pytest-9.0.2.pyc
+tests/__pycache__/test_app.cpython-313.pyc
+tests/__pycache__/test_backup_storage.cpython-313.pyc
+tests/__pycache__/test_payments.cpython-313.pyc
+tests/__pycache__/test_permits.cpython-313.pyc
+tests/__pycache__/test_sickness.cpython-313.pyc
+tests/__pycache__/test_validation.cpython-313.pyc
+tests/test_app.py
+tests/test_backup_storage.py
+tests/test_payments.py
+tests/test_permits.py
+tests/test_sickness.py
+tests/test_validation.py

@@ -9,6 +9,8 @@ const sicknessOnlyFields = document.getElementById('sicknessOnlyFields');
 const vacationOnlyFields = document.getElementById('vacationOnlyFields');
 const endDateField = document.getElementById('endDateField');
 const paidEntry = document.getElementById('paidEntry');
+const favorableTreatmentField = document.getElementById('favorableTreatmentField');
+const paidBeyondLegalLimit = document.getElementById('paidBeyondLegalLimit');
 const overtimeRateField = document.getElementById('overtimeRateField');
 const timeFields = document.getElementById('timeFields');
 const permitCategory = document.getElementById('permitCategory');
@@ -53,6 +55,8 @@ function syncEntryKind() {
   workForm.querySelector('[name=start_time]').required = usesTime;
   workForm.querySelector('[name=end_time]').required = usesTime;
   paidEntry.disabled = false;
+  document.getElementById('paidEntryField').classList.toggle('hidden', isVacation);
+  favorableTreatmentField.classList.toggle('hidden', !(isPermit || isSickness));
 
   if (!isWork) {
     const firstDate = workForm.querySelector('[name=work_date]').value;
@@ -73,6 +77,7 @@ function resetWorkForm() {
   paidEntry.checked = true;
   paidEntry.disabled = false;
   workForm.querySelector('[name=rate_override]').value = '';
+  paidBeyondLegalLimit.checked = false;
   document.getElementById('workDialogTitle').textContent = 'Nuova registrazione';
   deleteWorkButton.classList.add('hidden');
   syncEntryKind();
@@ -120,9 +125,7 @@ function openEditModal(event) {
     workForm.querySelector('[name=start_time]').value = props.start_time;
     workForm.querySelector('[name=end_time]').value = props.end_time;
     paidEntry.checked = Boolean(props.paid);
-    workForm.querySelector('[name=paid_hours]').value = props.paid_hours || '';
-    workForm.querySelector('[name=paid_beyond_legal_limit]').checked = props.entry_kind === 'permit' && Boolean(props.paid_beyond_legal_limit);
-    workForm.querySelector('[name=sickness_paid_beyond_legal_limit]').checked = props.entry_kind === 'sickness' && Boolean(props.paid_beyond_legal_limit);
+    paidBeyondLegalLimit.checked = ['permit', 'sickness'].includes(props.entry_kind) && Boolean(props.paid_beyond_legal_limit);
     workForm.querySelector('[name=oncological]').checked = Boolean(props.oncological);
     if (permitCategory) permitCategory.value = props.permit_category || (props.paid ? 'medical' : 'other');
     workForm.querySelector('[name=notes]').value = props.notes || '';
@@ -151,9 +154,7 @@ async function openAbsenceById(absenceId) {
   workForm.querySelector('[name=start_time]').value = data.start_time;
   workForm.querySelector('[name=end_time]').value = data.end_time;
   paidEntry.checked = Boolean(data.paid);
-  workForm.querySelector('[name=paid_hours]').value = data.paid_hours || '';
-  workForm.querySelector('[name=paid_beyond_legal_limit]').checked = data.kind === 'permit' && Boolean(data.paid_beyond_legal_limit);
-  workForm.querySelector('[name=sickness_paid_beyond_legal_limit]').checked = data.kind === 'sickness' && Boolean(data.paid_beyond_legal_limit);
+  paidBeyondLegalLimit.checked = ['permit', 'sickness'].includes(data.kind) && Boolean(data.paid_beyond_legal_limit);
   workForm.querySelector('[name=oncological]').checked = Boolean(data.oncological);
   if (permitCategory) permitCategory.value = data.permit_category || (data.paid ? 'medical' : 'other');
   workForm.querySelector('[name=notes]').value = data.notes || '';
@@ -400,11 +401,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (['ordinary', 'overtime'].includes(kind)) {
         delete formData.end_date;
         delete formData.paid_entry;
-        delete formData.paid_hours;
         delete formData.permit_category;
         delete formData.paid_beyond_legal_limit;
-        delete formData.sickness_paid_beyond_legal_limit;
         delete formData.oncological;
+        if (kind !== 'overtime') delete formData.rate_override;
         formData.entry_kind = kind;
         formData.paid = paidEntry.checked;
         await saveWork(formData, recordId);
@@ -415,17 +415,16 @@ document.addEventListener('DOMContentLoaded', () => {
         delete formData.location_id;
         delete formData.break_minutes;
         delete formData.rate_override;
-        delete formData.sickness_paid_beyond_legal_limit;
-        if (kind !== 'permit') { delete formData.permit_category; delete formData.paid_hours; }
+        if (kind !== 'permit') delete formData.permit_category;
         delete formData.paid_entry;
         formData.paid = paidEntry.checked;
-        formData.paid_beyond_legal_limit = kind === 'permit'
-          ? workForm.querySelector('[name=paid_beyond_legal_limit]').checked
-          : kind === 'sickness'
-            ? workForm.querySelector('[name=sickness_paid_beyond_legal_limit]').checked
-            : false;
-        formData.oncological = workForm.querySelector('[name=oncological]').checked;
-        if (['vacation','sickness'].includes(kind)) { delete formData.start_time; delete formData.end_time; delete formData.paid_hours; }
+        formData.paid_beyond_legal_limit = ['permit', 'sickness'].includes(kind)
+          ? paidBeyondLegalLimit.checked
+          : false;
+        formData.oncological = kind === 'sickness'
+          ? workForm.querySelector('[name=oncological]').checked
+          : false;
+        if (['vacation','sickness'].includes(kind)) { delete formData.start_time; delete formData.end_time; }
         await saveAbsence(formData, recordId);
       }
       workDialog.close();

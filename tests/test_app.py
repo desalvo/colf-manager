@@ -688,6 +688,10 @@ def test_calendar_dialog_has_one_paid_choice_and_type_specific_sections(app, cli
     assert 'id="permitOnlyFields"' in dialog
     assert 'id="sicknessOnlyFields"' in dialog
     assert 'id="vacationOnlyFields"' in dialog
+    assert dialog.count('id="paidBeyondLegalLimit"') == 1
+    assert dialog.count("Trattamento di miglior favore") == 1
+    assert 'name="sickness_paid_beyond_legal_limit"' not in dialog
+    assert 'name="paid_hours"' not in dialog
 
     javascript = (Path(__file__).parents[1] / "src/colf_manager/static/calendar.js").read_text()
     assert "paidEntry.checked = props.paid !== false" in javascript
@@ -695,6 +699,33 @@ def test_calendar_dialog_has_one_paid_choice_and_type_specific_sections(app, cli
     assert "paidEntry.checked = Boolean(data.paid)" in javascript
     sync_body = javascript.split("function syncEntryKind() {", 1)[1].split("function resetWorkForm()", 1)[0]
     assert "paidEntry.checked = true" not in sync_body
+
+
+def test_permit_hours_are_always_derived_from_start_and_end(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = 40
+        db.session.commit()
+    login(client)
+    response = client.post(
+        "/api/absence",
+        json={
+            "worker_id": worker_id,
+            "kind": "permit",
+            "start_date": "2026-09-15",
+            "end_date": "2026-09-15",
+            "start_time": "09:00",
+            "end_time": "10:30",
+            "permit_category": "medical",
+            "paid": True,
+            "paid_hours": "99",
+        },
+    )
+    assert response.status_code == 201
+    with app.app_context():
+        absence = Absence.query.order_by(Absence.id.desc()).first()
+        assert Decimal(absence.paid_hours) == Decimal("1.50")
 
 
 def test_calendar_vacation_sickness_crud_and_work_coexist(app, client):

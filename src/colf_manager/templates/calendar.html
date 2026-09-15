@@ -52,6 +52,7 @@
     <label>Lavoratore<select name="worker_id" required>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
     <div class="formgrid date-fields"><label>Data iniziale<input type="date" name="work_date" required></label><label id="endDateField" class="hidden">Data finale inclusa<input type="date" name="end_date"></label></div>
     <label class="check" id="paidEntryField"><input type="checkbox" name="paid_entry" id="paidEntry" checked> Retribuita</label>
+    <label class="check hidden" id="favorableTreatmentField"><input type="checkbox" name="paid_beyond_legal_limit" id="paidBeyondLegalLimit"> Trattamento di miglior favore: retribuisci anche oltre il limite contrattuale</label>
     <div class="formgrid" id="timeFields"><label>Inizio<input type="time" name="start_time" required value="09:00"></label><label>Fine<input type="time" name="end_time" required value="13:00"></label></div>
     <div id="workOnlyFields">
       <label>Luogo<select name="location_id"><option value="">Seleziona un luogo</option>{% for location in locations %}<option value="{{location.id}}">{{location.name}}{% if location.address %} — {{location.address}}{% endif %}</option>{% endfor %}</select></label>
@@ -59,14 +60,11 @@
       <label id="overtimeRateField" class="hidden">Tariffa straordinaria (€ / ora) <small>Vuoto = tariffa oraria vigente.</small><input type="number" min="0" step=".01" name="rate_override"></label>
     </div>
     <div id="permitOnlyFields" class="hidden">
-      <label>Categoria permesso<select name="permit_category" id="permitCategory">{% for code,label in permit_categories.items() %}<option value="{{code}}">{{label}}</option>{% endfor %}</select><small>Le categorie retribuite sono validate rispetto al monte previsto dal CCNL vigente per la data.</small></label>
-      <label>Ore della registrazione <small>Vuoto = calcolo automatico dall'intervallo inserito.</small><input type="number" min="0" step=".01" name="paid_hours"></label>
-      <label class="check"><input type="checkbox" name="paid_beyond_legal_limit"> Trattamento di miglior favore: retribuisci anche oltre il limite contrattuale</label>
+      <label>Categoria permesso<select name="permit_category" id="permitCategory">{% for code,label in permit_categories.items() %}<option value="{{code}}">{{label}}</option>{% endfor %}</select><small>Le categorie retribuite sono validate rispetto al monte previsto dal CCNL vigente per la data. Le ore sono calcolate automaticamente dall'ora di inizio e fine.</small></label>
     </div>
     <div id="sicknessOnlyFields" class="hidden">
       <p class="fineprint">La malattia è sempre contabilizzata in giorni di calendario. La retribuzione contrattuale è calcolata automaticamente in base all'anzianità e alla regola vigente per la data.</p>
       <label class="check"><input type="checkbox" name="oncological"> Malattia oncologica documentata</label>
-      <label class="check"><input type="checkbox" name="sickness_paid_beyond_legal_limit"> Trattamento di miglior favore: retribuisci anche oltre il limite contrattuale</label>
     </div>
     <div id="vacationOnlyFields" class="hidden">
       <p class="fineprint">Le ferie sono sempre contabilizzate ed esposte in giorni; gli orari non si applicano.</p>

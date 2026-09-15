@@ -1,6 +1,14 @@
 # Changelog
 
 
+## r72-full - calendar field relevance and automatic permit hours
+
+- Single employer-favorable-treatment control, shown only for permits and sickness.
+- Type-specific editor hides all non-pertinent properties, including paid choice for vacation.
+- Permit hours are always derived from start/end time; manual `paid_hours` input is removed and legacy values are ignored by the API.
+- Editing keeps the stored paid/favorable-treatment state and all applicable event properties.
+
+
 ## r71-full - calendar type-specific editor
 
 - The calendar editor now exposes a single shared **Retribuita** choice for all event types.

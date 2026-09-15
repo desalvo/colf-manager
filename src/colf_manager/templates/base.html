@@ -73,9 +73,15 @@
       const desktopMq = window.matchMedia('(min-width: 851px)');
 
       const setMobileMenu = (open) => {
-        body.classList.toggle('menu-open', open);
-        toggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
-        toggle?.setAttribute('aria-label', open ? 'Chiudi menu' : 'Apri menu');
+        const isMobile = !desktopMq.matches;
+        const shouldOpen = Boolean(open && isMobile);
+        body.classList.toggle('menu-open', shouldOpen);
+        toggle?.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+        toggle?.setAttribute('aria-label', shouldOpen ? 'Chiudi menu' : 'Apri menu');
+        scrim?.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+        if (isMobile) sidebar?.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+        else sidebar?.removeAttribute('aria-hidden');
+        if (shouldOpen) window.setTimeout(() => sidebar?.querySelector('a')?.focus(), 80);
       };
       const setCollapsed = (collapsed) => {
         body.classList.toggle('sidebar-collapsed', collapsed);
@@ -85,12 +91,23 @@
       };
 
       if (desktopMq.matches) setCollapsed(localStorage.getItem('colf-sidebar-collapsed') === '1');
+      else setMobileMenu(false);
       toggle?.addEventListener('click', () => setMobileMenu(!body.classList.contains('menu-open')));
       scrim?.addEventListener('click', () => setMobileMenu(false));
       collapse?.addEventListener('click', () => setCollapsed(!body.classList.contains('sidebar-collapsed')));
       sidebar?.querySelectorAll('a').forEach(link => link.addEventListener('click', () => { if (!desktopMq.matches) setMobileMenu(false); }));
       document.addEventListener('keydown', event => { if (event.key === 'Escape') setMobileMenu(false); });
-      window.addEventListener('resize', () => { if (desktopMq.matches) setMobileMenu(false); });
+      const syncResponsiveNavigation = () => {
+        if (desktopMq.matches) {
+          setMobileMenu(false);
+          sidebar?.removeAttribute('aria-hidden');
+          setCollapsed(localStorage.getItem('colf-sidebar-collapsed') === '1');
+        } else {
+          body.classList.remove('sidebar-collapsed');
+          setMobileMenu(false);
+        }
+      };
+      window.addEventListener('resize', syncResponsiveNavigation);
     })();
   </script>
   {% block scripts %}{% endblock %}

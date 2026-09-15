@@ -1,4 +1,4 @@
-## r44-full - 2026-09-14
+## r45-full - 2026-09-14
 
 - Dashboard: added monthly thirteenth accrual, year-to-date thirteenth accrual, year-to-date TFR accrual, vacation days used in the selected month, and projected vacation days remaining in the year.
 - Dashboard annual indicators now use the selected month end as cutoff while preserving existing monthly statistics.
@@ -144,7 +144,7 @@
 - Close the mobile drawer when selecting a navigation link or pressing Escape.
 - Keep desktop navigation behavior unchanged and improve mobile accessibility with `aria-controls` and `aria-expanded`.
 
-## r44-full - 2026-09-14
+## r45-full - 2026-09-14
 
 - Ridisegnata la navigazione: sidebar sempre disponibile, minimizzabile su desktop e drawer accessibile su mobile.
 - Nuovo calendario time-grid con blocchi proporzionali alla durata, colori contestuali, modifica/cancellazione e drag-and-drop degli inserimenti recenti.

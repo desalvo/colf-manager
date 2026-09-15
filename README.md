@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r44-full
+# colf-manager 1.0.0 · build r45-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -72,3 +72,8 @@ r29 uses `postgres:18.6-alpine`. Existing PostgreSQL 17 installations require a 
 
 
 Local packaged photographic assets are bundled in `src/colf_manager/static/heroes/`.
+
+
+## Responsive mobile r45
+
+The mobile/tablet UI uses a dedicated off-canvas navigation shell: the sidebar is hidden by default below 851 px and is available only through the hamburger control. Page content, forms, cards, reports and calendar panels stay inside the viewport; tables and time-grid calendar views use local contained scrolling where needed.

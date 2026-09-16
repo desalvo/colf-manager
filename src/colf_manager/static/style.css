@@ -630,3 +630,14 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 
 /* Generic visibility utility used by dynamic forms. */
 .hidden{display:none!important}
+
+/* r80 quick calendar deletion and monthly pay breakdown */
+.calendar-event-content{position:relative;padding-right:20px}
+.calendar-quick-delete{position:absolute;top:1px;right:1px;width:18px;height:18px;min-width:18px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.92);color:#8f2f2f;font:800 15px/17px system-ui,sans-serif;box-shadow:0 1px 3px #0003;opacity:.82;z-index:4}
+.calendar-quick-delete:hover,.calendar-quick-delete:focus-visible{opacity:1;background:#fff;color:#b42318;outline:2px solid #fff8}
+.fc-dayGridMonth-view .calendar-event-content.month-compact{padding-right:20px}
+.compensation-breakdown{grid-column:span 2}
+.compensation-breakdown .breakdown-lines{display:grid;gap:4px;margin-top:7px;font-size:12px}
+.compensation-breakdown .breakdown-lines span{display:flex;justify-content:space-between;gap:12px;color:var(--muted)}
+.compensation-breakdown .breakdown-lines b{color:var(--ink);white-space:nowrap}
+@media(max-width:850px){.compensation-breakdown{grid-column:1/-1}.calendar-quick-delete{opacity:1}}

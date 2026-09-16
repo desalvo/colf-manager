@@ -1437,3 +1437,70 @@ def test_signature_image_crops_transparent_margins_before_centering(tmp_path):
     assert signature is not None
     assert signature.imageWidth < 200
     assert signature.hAlign == "CENTER"
+
+
+def test_reports_show_monthly_compensation_breakdown_and_vacation_days(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = Decimal("40")
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=Decimal("10.00")))
+        db.session.add_all([
+            WorkEntry(worker_id=worker_id, work_date=date(2026, 9, 1), start_time=time(9), end_time=time(11), break_minutes=0, entry_kind="ordinary", paid=True, location="Casa"),
+            WorkEntry(worker_id=worker_id, work_date=date(2026, 9, 2), start_time=time(9), end_time=time(10), break_minutes=0, entry_kind="overtime", paid=True, rate_override=Decimal("15.00"), location="Casa"),
+            Absence(worker_id=worker_id, start_date=date(2026, 9, 3), end_date=date(2026, 9, 3), start_time=time(9), end_time=time(10), kind="permit", permit_category="medical", paid=True, paid_hours=Decimal("1")),
+            Absence(worker_id=worker_id, start_date=date(2026, 9, 4), end_date=date(2026, 9, 4), kind="sickness", paid=True, paid_hours=Decimal("1")),
+            Absence(worker_id=worker_id, start_date=date(2026, 9, 7), end_date=date(2026, 9, 7), kind="vacation", paid=True, paid_hours=Decimal("1")),
+        ])
+        db.session.commit()
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=9")
+    assert response.status_code == 200
+    assert b"Dettaglio costo retribuzione mensile" in response.data
+    assert b"Ore ordinarie" in response.data
+    assert b"Ore straordinarie" in response.data
+    assert b"Permessi retribuiti" in response.data
+    assert b"Malattia" in response.data
+    assert b"Ferie" in response.data
+    assert b'data-metric="vacation-days-used-month">1.00' in response.data
+
+
+def test_calendar_exposes_quick_delete_without_opening_edit_dialog(app, client):
+    login(client)
+    response = client.get("/calendar")
+    assert response.status_code == 200
+    script = (Path(__file__).resolve().parents[1] / "src" / "colf_manager" / "static" / "calendar.js").read_text()
+    assert "quickDeleteCalendarEvent" in script
+    assert "calendar-quick-delete" in script
+    assert "Elimina senza aprire" in script
+
+
+def test_signature_story_centres_signature_with_nested_table(tmp_path):
+    from PIL import Image, ImageDraw
+    from colf_manager.reporting import _signature_story, _styles
+
+    path = tmp_path / "signature-offset.png"
+    source = Image.new("RGB", (900, 220), "white")
+    draw = ImageDraw.Draw(source)
+    draw.line((20, 110, 180, 80), fill="black", width=8)
+    source.save(path)
+
+    class Person:
+        first_name = "Mario"
+        last_name = "Rossi"
+
+    story = _signature_story(
+        Person(),
+        Person(),
+        _styles(),
+        {
+            "mode": "employer",
+            "place": "Roma",
+            "date": date(2026, 9, 16),
+            "employer_signature": str(path),
+        },
+    )
+    outer = story[-1]
+    cell_flowables = outer._cellvalues[0][0]
+    nested_tables = [item for item in cell_flowables if item.__class__.__name__ == "Table"]
+    assert nested_tables, "La firma deve essere centrata tramite una tabella interna"

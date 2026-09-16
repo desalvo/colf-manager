@@ -230,21 +230,54 @@ def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=
         (e.hours for e in entries if getattr(e, "paid", None) is not False), Decimal("0")
     )
     unpaid_work_hours = worked_hours - paid_work_hours
-    worked_pay = sum(
+    def entry_value(entry):
+        rate = (
+            Decimal(entry.rate_override)
+            if (getattr(entry, "entry_kind", None) or "ordinary") == "overtime"
+            and getattr(entry, "rate_override", None) is not None
+            else rate_on(rates, entry.work_date)
+        )
+        return entry.hours * rate
+
+    ordinary_pay = sum(
         (
-            e.hours
-            * (
-                Decimal(e.rate_override)
-                if (getattr(e, "entry_kind", None) or "ordinary") == "overtime"
-                and getattr(e, "rate_override", None) is not None
-                else rate_on(rates, e.work_date)
-            )
+            entry_value(e)
             for e in entries
-            if getattr(e, "paid", None) is not False
+            if (getattr(e, "entry_kind", None) or "ordinary") == "ordinary"
+            and getattr(e, "paid", None) is not False
         ),
         Decimal("0"),
     )
-    paid_absence = _paid_absence_total(absences, rates, period_start, period_end, worker)
+    overtime_pay = sum(
+        (
+            entry_value(e)
+            for e in entries
+            if (getattr(e, "entry_kind", None) or "ordinary") == "overtime"
+            and getattr(e, "paid", None) is not False
+        ),
+        Decimal("0"),
+    )
+    worked_pay = ordinary_pay + overtime_pay
+
+    permit_absences = [a for a in absences if getattr(a, "kind", None) == "permit"]
+    sickness_absences = [a for a in absences if getattr(a, "kind", None) in {"sickness", "health"}]
+    vacation_absences = [a for a in absences if getattr(a, "kind", None) == "vacation"]
+    categorized_ids = {id(a) for a in permit_absences + sickness_absences + vacation_absences}
+    other_absences = [a for a in absences if id(a) not in categorized_ids]
+
+    paid_permit_pay = _paid_absence_total(permit_absences, rates, period_start, period_end, worker)
+    sickness_pay = _paid_absence_total(sickness_absences, rates, period_start, period_end, worker)
+    vacation_pay = _paid_absence_total(vacation_absences, rates, period_start, period_end, worker)
+    other_paid_absence = _paid_absence_total(other_absences, rates, period_start, period_end, worker)
+    paid_absence = paid_permit_pay + sickness_pay + vacation_pay + other_paid_absence
+
+    vacation_days_used_month = Decimal(
+        sum(
+            vacation_working_days(max(a.start_date, period_start), min(a.end_date, period_end))
+            for a in vacation_absences
+            if max(a.start_date, period_start) <= min(a.end_date, period_end)
+        )
+    )
 
     worker_advances = sum(
         (
@@ -274,7 +307,13 @@ def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=
         "paid_work_hours": money(paid_work_hours),
         "unpaid_work_hours": money(unpaid_work_hours),
         "worked_pay": money(worked_pay),
+        "ordinary_pay": money(ordinary_pay),
+        "overtime_pay": money(overtime_pay),
+        "paid_permit_pay": money(paid_permit_pay),
+        "sickness_pay": money(sickness_pay),
+        "vacation_pay": money(vacation_pay),
         "paid_absence": money(paid_absence),
+        "vacation_days_used_month": money(vacation_days_used_month),
         "worker_advances": money(worker_advances),
         "employer_advances": money(employer_advances),
         "reimbursements": money(expense_adjustment),
@@ -288,7 +327,7 @@ def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=
 
 def annual_summary(entries, absences, expenses, rates, year, tfr_factor=TFR_DIVISOR, worker=None):
     months = [monthly_summary(entries, absences, expenses, rates, year, m, tfr_factor, worker) for m in range(1, 13)]
-    keys = ["worked_hours", "ordinary_hours", "overtime_hours", "paid_work_hours", "unpaid_work_hours", "worked_pay", "paid_absence", "worker_advances", "employer_advances", "reimbursements", "gross", "payable"]
+    keys = ["worked_hours", "ordinary_hours", "overtime_hours", "paid_work_hours", "unpaid_work_hours", "worked_pay", "ordinary_pay", "overtime_pay", "paid_permit_pay", "sickness_pay", "vacation_pay", "paid_absence", "vacation_days_used_month", "worker_advances", "employer_advances", "reimbursements", "gross", "payable"]
     total = {k: money(sum((m[k] for m in months), Decimal("0"))) for k in keys}
     total["thirteenth_accrual"] = money(total["gross"] / Decimal("12"))
     total["tfr_useful_compensation"] = money(total["gross"] + total["thirteenth_accrual"])

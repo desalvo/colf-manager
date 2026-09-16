@@ -216,6 +216,34 @@ async function deleteCurrentRecord() {
   calendar.refetchEvents();
 }
 
+
+async function quickDeleteCalendarEvent(event) {
+  const props = event.extendedProps || {};
+  const isWork = props.type === 'work';
+  const recordId = isWork
+    ? event.id.replace('work-', '')
+    : (props.absence_id || event.id.replace('absence-', ''));
+  if (!recordId) return;
+  const label = isWork
+    ? 'questa registrazione di ore'
+    : props.entry_kind === 'vacation'
+      ? 'queste ferie'
+      : props.entry_kind === 'sickness'
+        ? 'questa registrazione di malattia'
+        : 'questo permesso';
+  if (!confirm(`Eliminare definitivamente ${label}?`)) return;
+  const response = await fetch(isWork ? `/api/work/${recordId}` : `/api/absence/${recordId}`, {
+    method: 'DELETE',
+    headers: {'X-CSRFToken': csrfToken()},
+  });
+  if (!response.ok) {
+    alert('Impossibile eliminare la registrazione.');
+    return;
+  }
+  event.remove();
+  calendar.refetchEvents();
+}
+
 function initExternalPatterns() {
   const container = document.getElementById('recentPatterns');
   if (!container || !window.FullCalendar?.Draggable) return;
@@ -354,6 +382,19 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         wrap.innerHTML = `<b class="event-time">${timeRange}</b><span>${props.kind_label}</span><small>${props.worker}</small><small>${props.employer}</small>`;
       }
+      const quickDelete = document.createElement('button');
+      quickDelete.type = 'button';
+      quickDelete.className = 'calendar-quick-delete';
+      quickDelete.title = 'Elimina senza aprire';
+      quickDelete.setAttribute('aria-label', 'Elimina registrazione dal calendario');
+      quickDelete.textContent = '×';
+      quickDelete.addEventListener('pointerdown', (event) => event.stopPropagation());
+      quickDelete.addEventListener('click', async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await quickDeleteCalendarEvent(arg.event);
+      });
+      wrap.appendChild(quickDelete);
       return {domNodes: [wrap]};
     },
     eventDidMount: (info) => {

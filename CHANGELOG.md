@@ -1,3 +1,10 @@
+## r80 - signature centering, calendar quick delete, monthly pay breakdown
+
+- Centra visivamente le firme PDF con una sotto-tabella dedicata nel riquadro firma.
+- Aggiunge cancellazione rapida direttamente dagli eventi del calendario.
+- Aggiunge in Report e paghe il dettaglio del costo mensile per ordinarie, straordinarie, permessi retribuiti, malattia e ferie.
+- Aggiunge l'indicatore dei giorni di ferie usati nel mese.
+
 ## r79 - Pillow signature pixel API compatibility
 
 - Replaced deprecated Pillow `Image.getdata()` usage with `get_flattened_data()` when available.

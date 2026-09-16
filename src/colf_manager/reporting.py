@@ -355,17 +355,29 @@ def _signature_story(worker, employer, styles, approval=None):
         )
         signers.append(("Firma datore di lavoro", employer_name, approval.get("employer_signature")))
 
+    widths = [160 * mm] if len(signers) == 1 else [80 * mm, 80 * mm]
     cells = []
-    for label, name, signature_path in signers:
+    for index, (label, name, signature_path) in enumerate(signers):
         signature = _signature_image(signature_path)
         body = [Paragraph(f"<b>{label}</b>", styles["CMCenter"]), Spacer(1, 5)]
         if signature:
-            body.extend([signature, Spacer(1, 3)])
+            # ReportLab does not reliably honour Image.hAlign when the image is
+            # a flowable directly inside a Table cell. Centre it explicitly in
+            # a nested one-cell table spanning the usable signature-cell width.
+            signature_box = Table([[signature]], colWidths=[widths[index] - 20])
+            signature_box.setStyle(TableStyle([
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]))
+            body.extend([signature_box, Spacer(1, 3)])
         else:
             body.extend([Spacer(1, 13*mm), Paragraph("________________________________________", styles["CMCenter"])])
         body.append(Paragraph(f"<b>{name}</b>", styles["CMCenter"]))
         cells.append(body)
-    widths = [160 * mm] if len(cells) == 1 else [80 * mm, 80 * mm]
     table = Table([cells], colWidths=widths)
     table.setStyle(
         TableStyle([

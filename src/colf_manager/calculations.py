@@ -126,9 +126,36 @@ def _paid_absence_value(absence, rates, period_start, period_end):
     overlap_end = min(absence.end_date, period_end)
     if overlap_start > overlap_end:
         return Decimal("0")
+
+    kind = getattr(absence, "kind", None)
+    if kind == "vacation":
+        # A continuous vacation event is charged economically in the month in
+        # which the event ends.  Entitlement consumption remains day-based and
+        # is still counted on the actual contractual vacation days in each
+        # month, but payroll/payment must not split one continuous vacation
+        # across multiple months.
+        if not (period_start <= absence.end_date <= period_end):
+            return Decimal("0")
+
+        total_vacation_days = vacation_working_days(absence.start_date, absence.end_date)
+        if total_vacation_days <= 0:
+            return Decimal("0")
+        hours_per_vacation_day = Decimal(absence.paid_hours) / Decimal(total_vacation_days)
+        holidays = set()
+        for year in range(absence.start_date.year, absence.end_date.year + 1):
+            holidays |= italian_national_holidays(year)
+        return sum(
+            (
+                hours_per_vacation_day * rate_on(rates, day)
+                for day in _days(absence.start_date, absence.end_date)
+                if day.weekday() != 6 and day not in holidays
+            ),
+            Decimal("0"),
+        )
+
     total_days = (absence.end_date - absence.start_date).days + 1
     hours_per_day = Decimal(absence.paid_hours) / Decimal(total_days)
-    if getattr(absence, "kind", None) in {"sickness", "health"}:
+    if kind in {"sickness", "health"}:
         total = Decimal("0")
         for day in _days(overlap_start, overlap_end):
             event_day = (day - absence.start_date).days + 1

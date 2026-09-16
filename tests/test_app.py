@@ -7,7 +7,14 @@ from pathlib import Path
 import pytest
 
 from colf_manager.app import create_app
-from colf_manager.calculations import monthly_summary, vacation_balance
+from colf_manager.calculations import (
+    annual_summary,
+    money,
+    monthly_summary,
+    vacation_balance,
+    vacation_hours_per_day,
+    vacation_working_days,
+)
 from colf_manager.models import (
     Absence,
     Document,
@@ -171,7 +178,7 @@ def test_expense_direction_changes_payable(app):
         assert s["payable"] == Decimal("25.00")
 
 
-def test_paid_absence_is_split_across_month_and_rate_change(app):
+def test_continuous_vacation_is_charged_to_end_month_across_rate_change(app):
     with app.app_context():
         rates = [
             HourlyRate(valid_from=date(2026, 9, 1), amount=10),
@@ -183,6 +190,25 @@ def test_paid_absence_is_split_across_month_and_rate_change(app):
             paid=True,
             paid_hours=8,
             kind="vacation",
+        )
+        september = monthly_summary([], [absence], [], rates, 2026, 9)
+        october = monthly_summary([], [absence], [], rates, 2026, 10)
+        assert september["paid_absence"] == Decimal("0.00")
+        assert october["paid_absence"] == Decimal("88.00")
+
+
+def test_paid_permit_is_still_split_across_month_and_rate_change(app):
+    with app.app_context():
+        rates = [
+            HourlyRate(valid_from=date(2026, 9, 1), amount=10),
+            HourlyRate(valid_from=date(2026, 10, 1), amount=12),
+        ]
+        absence = Absence(
+            start_date=date(2026, 9, 30),
+            end_date=date(2026, 10, 1),
+            paid=True,
+            paid_hours=8,
+            kind="permit",
         )
         september = monthly_summary([], [absence], [], rates, 2026, 9)
         october = monthly_summary([], [absence], [], rates, 2026, 10)
@@ -1504,3 +1530,51 @@ def test_signature_story_centres_signature_with_nested_table(tmp_path):
     cell_flowables = outer._cellvalues[0][0]
     nested_tables = [item for item in cell_flowables if item.__class__.__name__ == "Table"]
     assert nested_tables, "La firma deve essere centrata tramite una tabella interna"
+
+
+def test_continuous_vacation_pay_is_charged_in_end_month(app):
+    with app.app_context():
+        worker = Worker(
+            first_name="Anna",
+            last_name="Ferie",
+            employment_start=date(2026, 1, 1),
+            weekly_hours=Decimal("20"),
+        )
+        rates = [HourlyRate(valid_from=date(2026, 1, 1), amount=Decimal("9.00"))]
+        paid_hours = vacation_hours_per_day(worker) * Decimal(
+            vacation_working_days(date(2026, 7, 31), date(2026, 8, 31))
+        )
+        absence = Absence(
+            start_date=date(2026, 7, 31),
+            end_date=date(2026, 8, 31),
+            kind="vacation",
+            paid=True,
+            paid_hours=paid_hours,
+        )
+
+        july = monthly_summary([], [absence], [], rates, 2026, 7, worker=worker)
+        august = monthly_summary([], [absence], [], rates, 2026, 8, worker=worker)
+        annual = annual_summary([], [absence], [], rates, 2026, worker=worker)
+
+        assert vacation_working_days(date(2026, 7, 31), date(2026, 8, 31)) == 26
+        assert july["vacation_days_used_month"] == Decimal("1.00")
+        assert august["vacation_days_used_month"] == Decimal("25.00")
+        # Fruition remains attributed to the actual months, while the entire
+        # economic value of one continuous vacation period is charged in its
+        # ending month.
+        assert july["vacation_pay"] == Decimal("0.00")
+        assert august["vacation_pay"] == Decimal("779.94")
+        assert annual["vacation_pay"] == Decimal("779.94")
+
+
+def test_vacation_daily_value_for_20_hours_week_at_9_euro(app):
+    with app.app_context():
+        worker = Worker(
+            first_name="Anna",
+            last_name="Ferie",
+            employment_start=date(2026, 1, 1),
+            weekly_hours=Decimal("20"),
+        )
+        hours = vacation_hours_per_day(worker)
+        assert hours.quantize(Decimal("0.0001")) == Decimal("3.3331")
+        assert money(hours * Decimal("9.00")) == Decimal("30.00")

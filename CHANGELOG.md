@@ -1,3 +1,18 @@
+# Changelog
+
+## r83-full - continuous vacation payroll attribution
+
+- Continuous vacation periods spanning multiple months are economically charged in full to the month in which the vacation ends.
+- Vacation entitlement/usage remains counted on the actual contractual vacation days in each month.
+- Added regression coverage for 31/07/2026–31/08/2026 at 20 h/week and EUR 9/hour: July EUR 0.00, August EUR 779.94, annual EUR 779.94.
+- Updated the cross-month/rate-change regression to expect the full vacation amount in the ending month, while adding a separate paid-permit regression that remains split by month and applicable rate.
+
+## r81 - correct vacation payroll allocation across months
+
+- Fix vacation payroll allocation: equivalent paid hours are now distributed only over contractual vacation days (Monday-Saturday excluding national holidays), never across all calendar days spanned by an absence.
+- Regression coverage for 20 weekly hours at EUR 9/hour: 31 July 2026 = EUR 30.00, August 2026 = EUR 749.94, 26-day total = EUR 779.94.
+- Preserve the INPS monthly-hours / 26 conversion already used to calculate the vacation daily equivalent.
+
 ## r80 - signature centering, calendar quick delete, monthly pay breakdown
 
 - Centra visivamente le firme PDF con una sotto-tabella dedicata nel riquadro firma.

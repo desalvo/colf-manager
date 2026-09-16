@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r91-full
+# colf-manager 1.0.0 · build r96-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -73,7 +73,7 @@ La r25 usa `postgres:18.6-alpine`. Le installazioni PostgreSQL 17 esistenti rich
 ### Novità r55 - report, firme e pagamenti
 - Report PDF con logo applicativo, versione/build e autore su ogni pagina, grafica rinnovata e visualizzazione inline dall'archivio.
 - Firma grafica opzionale per lavoratore e datore caricabile dalle rispettive anagrafiche (PNG, JPEG, TIFF, WEBP, BMP) e apposta automaticamente ai report quando richiesta.
-- Registro Pagamenti con inserimento manuale e generazione automatica del residuo dai report: retribuzioni, contributi INPS, tredicesima, TFR, rimborsi e altri pagamenti; stato, data, periodo, note e allegati.
+- Registro Pagamenti con inserimento manuale e generazione automatica del residuo dai report: retribuzioni, contributi INPS, tredicesima, TFR, rimborsi e altri pagamenti; stato, modalità di pagamento (Bonifico bancario predefinito, Deposito su carta, Contanti o Altro), data, periodo, note e allegati.
 - I contributi INPS sono disponibili solo quando il lavoratore ha una posizione INPS registrata.
 - Full export/import include firme, pagamenti e relativi allegati oltre a database, documenti e report.
 

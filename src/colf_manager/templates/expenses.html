@@ -31,7 +31,7 @@
     <div class="expense-history-list">
       {% for e in expenses %}
         {% set w=workers|selectattr('id','equalto',e.worker_id)|first %}
-        <details class="expense-history-item collapsible-card">
+        <details class="expense-history-item collapsible-card" data-collapse-key="expense-history-{{e.id}}">
           <summary>
             <span class="expense-history-summary-main">
               <b>{{e.description}}</b>

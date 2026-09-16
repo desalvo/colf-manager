@@ -171,3 +171,8 @@ When a graphical worker or employer signature is available, PDFs make the white 
 
 ### Economic allocation of vacation spanning multiple months
 For one continuous vacation period spanning multiple months, if the starting month contains **at most 3 contractual vacation days**, the entire vacation remuneration is charged to the ending month and the carry-forward is shown in the UI and payroll PDF. If the starting month contains **4 or more days**, each vacation day is economically charged to its own month.
+
+
+### Calendar navigation and quick choices
+
+Use the Day, Month and Year controls to jump directly to a specific date while keeping the current calendar view. Drag-and-drop quick choices are ordered by usage frequency, with the most recent use breaking ties. Permit shortcuts also preserve the permit category.

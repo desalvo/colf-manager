@@ -14,6 +14,10 @@ const paidBeyondLegalLimit = document.getElementById('paidBeyondLegalLimit');
 const overtimeRateField = document.getElementById('overtimeRateField');
 const timeFields = document.getElementById('timeFields');
 const permitCategory = document.getElementById('permitCategory');
+const calendarJumpDay = document.getElementById('calendarJumpDay');
+const calendarJumpMonth = document.getElementById('calendarJumpMonth');
+const calendarJumpYear = document.getElementById('calendarJumpYear');
+const calendarJumpButton = document.getElementById('calendarJumpButton');
 
 function csrfToken() {
   return document.querySelector('meta[name="csrf-token"]').content;
@@ -24,6 +28,39 @@ function localDateString(date) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+
+function populateCalendarDateJump(referenceDate = new Date()) {
+  if (!calendarJumpDay || !calendarJumpMonth || !calendarJumpYear) return;
+  if (!calendarJumpDay.options.length) {
+    for (let day = 1; day <= 31; day += 1) {
+      calendarJumpDay.add(new Option(String(day).padStart(2, '0'), String(day)));
+    }
+  }
+  if (!calendarJumpMonth.options.length) {
+    const months = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
+    months.forEach((label, index) => calendarJumpMonth.add(new Option(label, String(index + 1))));
+  }
+  calendarJumpDay.value = String(referenceDate.getDate());
+  calendarJumpMonth.value = String(referenceDate.getMonth() + 1);
+  calendarJumpYear.value = String(referenceDate.getFullYear());
+}
+
+function jumpToCalendarDate() {
+  if (!calendar || !calendarJumpDay || !calendarJumpMonth || !calendarJumpYear) return;
+  const year = Number(calendarJumpYear.value);
+  const month = Number(calendarJumpMonth.value);
+  const day = Number(calendarJumpDay.value);
+  const target = new Date(year, month - 1, day, 12, 0, 0);
+  if (
+    !Number.isInteger(year) || year < 1900 || year > 2200 ||
+    target.getFullYear() !== year || target.getMonth() !== month - 1 || target.getDate() !== day
+  ) {
+    alert('Seleziona una data valida.');
+    return;
+  }
+  calendar.gotoDate(target);
 }
 
 function timeString(date) {
@@ -268,6 +305,7 @@ function initExternalPatterns() {
           end_time: el.dataset.end,
           paid: el.dataset.paid === '1',
           paid_hours: el.dataset.paidHours || '',
+          permit_category: el.dataset.permitCategory || '',
           rate_override: el.dataset.rateOverride || '',
           event_color: color,
         },
@@ -277,6 +315,15 @@ function initExternalPatterns() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  populateCalendarDateJump();
+  calendarJumpButton?.addEventListener('click', jumpToCalendarDate);
+  calendarJumpYear?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      jumpToCalendarDate();
+    }
+  });
+
   entryKind.addEventListener('change', () => {
     if (!workForm.querySelector('[name=record_id]').value) paidEntry.checked = true;
     syncEntryKind();
@@ -353,6 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
             end_time: props.end_time,
             paid: Boolean(props.paid),
             paid_hours: props.paid_hours || '',
+            permit_category: props.permit_category || '',
           });
         }
         info.event.remove();

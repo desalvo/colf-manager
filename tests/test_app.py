@@ -1315,6 +1315,7 @@ def test_reports_show_permit_values_and_annual_payment_totals(app, client):
     assert b"Maturato" in response.data
     assert b"Totale annuo" in response.data
     assert b"Totale pagamenti effettuati" in response.data
+    assert b"100,00" in response.data
     assert b"100.00" in response.data
 
 
@@ -1489,6 +1490,44 @@ def test_reports_show_monthly_compensation_breakdown_and_vacation_days(app, clie
     assert b"Malattia" in response.data
     assert b"Ferie" in response.data
     assert b'data-metric="vacation-days-used-month">1.00' in response.data
+
+
+def test_calendar_date_jump_controls_and_goto_date(app, client):
+    login(client)
+    response = client.get("/calendar")
+    assert response.status_code == 200
+    assert b'id="calendarJumpDay"' in response.data
+    assert b'id="calendarJumpMonth"' in response.data
+    assert b'id="calendarJumpYear"' in response.data
+    assert b'id="calendarJumpButton"' in response.data
+    script = (Path(__file__).resolve().parents[1] / "src" / "colf_manager" / "static" / "calendar.js").read_text()
+    assert "jumpToCalendarDate" in script
+    assert "calendar.gotoDate(target)" in script
+
+
+def test_calendar_quick_patterns_are_ranked_by_usage_then_recency(app, client):
+    login(client)
+    employer = Employer(first_name="Mario", last_name="Datore")
+    worker = Worker(first_name="Anna", last_name="Lavoratore", employment_start=date(2026, 1, 1))
+    location = Location(name="Casa")
+    with app.app_context():
+        db.session.add_all([employer, worker, location])
+        db.session.flush()
+        worker.employer_id = employer.id
+        db.session.add_all([
+            WorkEntry(worker_id=worker.id, location_id=location.id, location="Casa", work_date=date(2026, 9, 1), start_time=time(8), end_time=time(10), break_minutes=0, entry_kind="ordinary", paid=True),
+            WorkEntry(worker_id=worker.id, location_id=location.id, location="Casa", work_date=date(2026, 9, 2), start_time=time(8), end_time=time(10), break_minutes=0, entry_kind="ordinary", paid=True),
+            WorkEntry(worker_id=worker.id, location_id=location.id, location="Casa", work_date=date(2026, 9, 3), start_time=time(8), end_time=time(10), break_minutes=0, entry_kind="ordinary", paid=True),
+            WorkEntry(worker_id=worker.id, location_id=location.id, location="Casa", work_date=date(2026, 9, 10), start_time=time(15), end_time=time(17), break_minutes=0, entry_kind="ordinary", paid=True),
+        ])
+        db.session.commit()
+    response = client.get("/calendar")
+    assert response.status_code == 200
+    html = response.data.decode("utf-8")
+    first = html.index('data-start="08:00"')
+    second = html.index('data-start="15:00"')
+    assert first < second
+    assert 'data-usage-count="3"' in html
 
 
 def test_calendar_exposes_quick_delete_without_opening_edit_dialog(app, client):
@@ -1939,3 +1978,240 @@ def test_reports_total_hours_include_paid_and_unpaid_permits(app, client):
     assert response.status_code == 200
     assert b'data-metric="monthly-total-hours">4.50 h' in response.data
     assert b'data-metric="annual-total-hours">4.50 h' in response.data
+
+
+def test_currency_formatter_always_uses_two_decimal_digits():
+    from colf_manager.formatting import currency
+
+    assert currency(10) == "€ 10,00"
+    assert currency("125.5") == "€ 125,50"
+    assert currency(0) == "€ 0,00"
+    assert currency("12.345") == "€ 12,35"
+
+
+def test_reports_currency_values_have_two_decimal_digits(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(
+            HourlyRate(
+                worker_id=worker_id,
+                valid_from=date(2026, 1, 1),
+                amount=10,
+            )
+        )
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 1, 5),
+                start_time=time(9),
+                end_time=time(10),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
+        db.session.commit()
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=1")
+    assert response.status_code == 200
+    assert "€ 10,00".encode() in response.data
+    assert "€ 10.0<".encode() not in response.data
+
+
+def test_payment_method_defaults_to_bank_transfer_and_can_be_changed(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    response = client.post(
+        "/payments",
+        data={
+            "worker_id": worker_id,
+            "payment_type": "salary",
+            "amount": "100.00",
+            "status": "pending",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        payment = Payment.query.order_by(Payment.id.desc()).first()
+        assert payment.payment_method == "bank_transfer"
+        payment_id = payment.id
+
+    response = client.post(
+        f"/payments/{payment_id}/edit",
+        data={
+            "worker_id": worker_id,
+            "payment_type": "salary",
+            "payment_method": "cash",
+            "amount": "100.00",
+            "status": "paid",
+            "payment_date": "2026-09-16",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        payment = db.session.get(Payment, payment_id)
+        assert payment.payment_method == "cash"
+
+    detail = client.get(f"/payments/{payment_id}")
+    assert b"Modalit" in detail.data
+    assert b"Contanti" in detail.data
+
+
+def test_payment_method_rejects_invalid_value(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    response = client.post(
+        "/payments",
+        data={
+            "worker_id": worker_id,
+            "payment_type": "salary",
+            "payment_method": "crypto",
+            "amount": "10.00",
+            "status": "pending",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert "Modalità di pagamento non valida".encode() in response.data
+    with app.app_context():
+        assert Payment.query.count() == 0
+
+
+def test_payments_default_order_is_most_recent_period_first(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(
+            Payment(
+                worker_id=worker_id,
+                payment_type="salary",
+                amount=111.11,
+                status="pending",
+                period_start=date(2026, 12, 1),
+                period_end=date(2026, 12, 31),
+                description="Periodo recente",
+            )
+        )
+        db.session.flush()
+        db.session.add(
+            Payment(
+                worker_id=worker_id,
+                payment_type="salary",
+                amount=222.22,
+                status="pending",
+                period_start=date(2026, 1, 1),
+                period_end=date(2026, 1, 31),
+                description="Periodo vecchio",
+            )
+        )
+        db.session.commit()
+    login(client)
+    response = client.get(f"/payments?worker_id={worker_id}")
+    assert response.status_code == 200
+    recent = response.data.find(b"2026-12-01")
+    old = response.data.find(b"2026-01-01")
+    assert recent >= 0 and old >= 0
+    assert recent < old
+
+
+def test_archived_reports_default_order_is_most_recent_period_first(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        folder = Path(app.config["REPORT_FOLDER"])
+        folder.mkdir(parents=True, exist_ok=True)
+        for filename, stored, start, end in [
+            ("SENZA-CF-report-recente.pdf", "sort-period-recent.pdf", date(2026, 12, 1), date(2026, 12, 31)),
+            ("SENZA-CF-report-vecchio.pdf", "sort-period-old.pdf", date(2026, 1, 1), date(2026, 1, 31)),
+        ]:
+            (folder / stored).write_bytes(b"%PDF-1.4\n%%EOF")
+            db.session.add(
+                GeneratedReport(
+                    worker_id=worker_id,
+                    report_type="trend",
+                    filename=filename,
+                    stored_name=stored,
+                    sha256=("a" if "recente" in filename else "b") * 64,
+                    size_bytes=14,
+                    period_start=start,
+                    period_end=end,
+                )
+            )
+        db.session.commit()
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=12")
+    assert response.status_code == 200
+    assert b"archive_sort=period" in response.data
+    recent = response.data.find(b"report-recente.pdf")
+    old = response.data.find(b"report-vecchio.pdf")
+    assert recent >= 0 and old >= 0
+    assert recent < old
+
+
+def test_archived_reports_show_liquidated_amount_and_graphical_approval(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        folder = Path(app.config["REPORT_FOLDER"])
+        folder.mkdir(parents=True, exist_ok=True)
+        stored = "r95-liquidated-test.pdf"
+        (folder / stored).write_bytes(b"%PDF-1.4\n%%EOF")
+        report = GeneratedReport(
+            worker_id=worker_id,
+            report_type="monthly_payroll",
+            filename="SENZA-CF-cedolino-2026-08.pdf",
+            stored_name=stored,
+            sha256="c" * 64,
+            size_bytes=14,
+            period_start=date(2026, 8, 1),
+            period_end=date(2026, 8, 31),
+            approval_override=True,
+        )
+        db.session.add(report)
+        db.session.flush()
+        db.session.add(
+            Payment(
+                worker_id=worker_id,
+                source_report_id=report.id,
+                payment_type="salary",
+                amount=Decimal("123.45"),
+                status="paid",
+                payment_date=date(2026, 9, 1),
+                period_start=date(2026, 8, 1),
+                period_end=date(2026, 8, 31),
+            )
+        )
+        db.session.commit()
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=8")
+    assert response.status_code == 200
+    assert b"archive-liquidated" in response.data
+    assert "€ 123,45".encode() in response.data
+    assert b"approval-status-icon approved" in response.data
+    assert b"archive-actions" in response.data
+    assert b"archive_sort=liquidated" in response.data
+
+
+def test_report_sections_are_collapsed_by_default_and_collapsible_state_uses_cookie(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=1")
+    assert response.status_code == 200
+    assert b'data-collapse-key="reports-annual-summary"' in response.data
+    assert b'data-collapse-key="reports-archive"' in response.data
+    assert b"cm_collapsible_state" in response.data
+    assert b"Max-Age=${maxAge}" in response.data
+    assert b"SameSite=Lax" in response.data
+
+
+def test_all_current_collapsible_templates_have_persistent_keys():
+    root = Path(__file__).resolve().parents[1] / "src" / "colf_manager" / "templates"
+    dashboard = (root / "dashboard.html").read_text()
+    expenses = (root / "expenses.html").read_text()
+    reports = (root / "reports.html").read_text()
+    assert 'data-collapse-key="dashboard-hours-pay"' in dashboard
+    assert 'data-collapse-key="dashboard-vacation-sickness"' in dashboard
+    assert 'data-collapse-key="dashboard-permits"' in dashboard
+    assert 'data-collapse-key="dashboard-activity"' in dashboard
+    assert 'data-collapse-key="expense-history-{{e.id}}"' in expenses
+    assert 'data-collapse-key="reports-annual-summary"' in reports
+    assert 'data-collapse-key="reports-permits"' in reports
+    assert 'data-collapse-key="reports-archive"' in reports

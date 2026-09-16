@@ -6,6 +6,13 @@
   <section class="card calendar-card">
     <div class="toolbar calendar-toolbar">
       <label class="compact-field">Lavoratore<select id="workerFilter"><option value="">Tutti i lavoratori</option>{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
+      <fieldset class="calendar-date-jump" aria-label="Vai a una data specifica">
+        <legend>Vai alla data</legend>
+        <label>Giorno<select id="calendarJumpDay" aria-label="Giorno"></select></label>
+        <label>Mese<select id="calendarJumpMonth" aria-label="Mese"></select></label>
+        <label>Anno<input id="calendarJumpYear" type="number" min="1900" max="2200" step="1" aria-label="Anno"></label>
+        <button type="button" id="calendarJumpButton">Vai</button>
+      </fieldset>
       <button type="button" onclick="openEntryModal()">+ Nuova registrazione</button>
     </div>
     <div class="calendar-legend" aria-label="Legenda calendario"><span><i class="legend-swatch legend-work"></i> Ore ordinarie/straordinarie: colore per datore/lavoratore/luogo</span><span><i class="legend-swatch legend-vacation"></i> Ferie</span><span><i class="legend-swatch legend-sickness"></i> Malattia</span></div>
@@ -13,18 +20,18 @@
   </section>
   <aside class="calendar-rail">
     <section class="side-card quick-entry-panel">
-      <div class="card-title"><div><span class="eyebrow">Drag &amp; drop</span><h3>Inserimenti recenti</h3></div><span class="badge">{{recent_limit}}</span></div>
-      <p class="fineprint">Trascina un elemento sul giorno desiderato: cambia solo la data, mentre tipo, orari, lavoratore, datore e luogo restano invariati.</p>
+      <div class="card-title"><div><span class="eyebrow">Drag &amp; drop</span><h3>Inserimenti più usati</h3></div><span class="badge">{{recent_limit}}</span></div>
+      <p class="fineprint">Le combinazioni più utilizzate sono mostrate per prime. Trascina un elemento sul giorno desiderato: cambia solo la data, mentre tipo, orari, lavoratore, datore e luogo restano invariati.</p>
       <div id="recentPatterns" class="recent-patterns">
       {% for p in recent_patterns %}
         <article class="quick-pattern quick-pattern-pill" draggable="true" style="--event-color:{{p.color}}"
-          data-kind="{{p.entry_kind}}" data-worker-id="{{p.worker_id}}" data-location-id="{{p.location_id or ''}}" data-start="{{p.start_time}}" data-end="{{p.end_time}}" data-duration="{{p.duration_minutes}}" data-break="{{p.break_minutes}}" data-paid="{{1 if p.paid else 0}}" data-paid-hours="{{p.paid_hours}}" data-rate-override="{{p.rate_override if p.rate_override is defined else ''}}"
-          title="{{p.kind_label}} · {{p.start_time}}–{{p.end_time}} · {{p.worker_name}} · {{p.employer_name}}{% if p.location_name and p.location_name != '—' %} · {{p.location_name}}{% endif %}" tabindex="0">
+          data-kind="{{p.entry_kind}}" data-worker-id="{{p.worker_id}}" data-location-id="{{p.location_id or ''}}" data-start="{{p.start_time}}" data-end="{{p.end_time}}" data-duration="{{p.duration_minutes}}" data-break="{{p.break_minutes}}" data-paid="{{1 if p.paid else 0}}" data-paid-hours="{{p.paid_hours}}" data-permit-category="{{p.permit_category if p.permit_category is defined else ''}}" data-rate-override="{{p.rate_override if p.rate_override is defined else ''}}" data-usage-count="{{p.usage_count}}"
+          title="{{p.kind_label}} · {{p.start_time}}–{{p.end_time}} · {{p.worker_name}} · {{p.employer_name}}{% if p.location_name and p.location_name != '—' %} · {{p.location_name}}{% endif %} · usato {{p.usage_count}} {{'volta' if p.usage_count == 1 else 'volte'}}" tabindex="0">
           <span class="pattern-kind">{{p.kind_label}}</span>
           <span class="pattern-time"><b>{{p.start_time}}–{{p.end_time}}</b></span>
-          <span class="pattern-place">{{p.location_name if p.location_name and p.location_name != '—' else '—'}}</span>
+          <span class="pattern-place">{{p.location_name if p.location_name and p.location_name != '—' else '—'}} <small class="pattern-usage">×{{p.usage_count}}</small></span>
         </article>
-      {% else %}<p class="fineprint">Le combinazioni usate più di recente appariranno qui.</p>{% endfor %}
+      {% else %}<p class="fineprint">Le combinazioni usate più spesso appariranno qui.</p>{% endfor %}
       </div>
       <a class="text-link" href="/settings">⚙ Configura il numero di inserimenti rapidi</a>
     </section>

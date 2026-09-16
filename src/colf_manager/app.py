@@ -53,6 +53,7 @@ from .calculations import (
 )
 from . import __author__, __build__, __version__
 from .backup import create_full_export, restore_full_export
+from .formatting import currency
 from .models import (
     Absence,
     AuditLog,
@@ -340,6 +341,28 @@ def _ensure_legacy_schema_compatibility():
             db.session.commit()
 
     inspector = inspect(db.engine)
+    if "payment" in inspector.get_table_names():
+        columns = {c["name"] for c in inspector.get_columns("payment")}
+        if "payment_method" not in columns:
+            db.session.execute(
+                text(
+                    "ALTER TABLE payment ADD COLUMN payment_method "
+                    "VARCHAR(20) NOT NULL DEFAULT 'bank_transfer'"
+                )
+            )
+            db.session.commit()
+        try:
+            db.session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_payment_payment_method "
+                    "ON payment(payment_method)"
+                )
+            )
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+
+    inspector = inspect(db.engine)
     if "work_entry" in inspector.get_table_names():
         columns = {c["name"] for c in inspector.get_columns("work_entry")}
         if "location_id" not in columns:
@@ -460,6 +483,7 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+    app.jinja_env.filters["money"] = currency
     if _bool_env("COLF_MANAGER_PROXY_FIX", production):
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
@@ -1224,15 +1248,14 @@ def create_app(test_config=None):
             recent_limit = max(1, min(50, int(_setting("calendar_recent_limit", "10"))))
         except ValueError:
             recent_limit = 10
-        seen = set()
-        recent_patterns = []
+        pattern_index = {}
         candidates = []
-        for entry in WorkEntry.query.order_by(WorkEntry.work_date.desc(), WorkEntry.start_time.desc()).limit(250).all():
+        for entry in WorkEntry.query.order_by(WorkEntry.work_date.desc(), WorkEntry.start_time.desc()).all():
             candidates.append((entry.work_date, entry.start_time, entry.entry_kind or "ordinary", entry))
-        for absence in Absence.query.order_by(Absence.start_date.desc(), Absence.id.desc()).limit(250).all():
+        for absence in Absence.query.order_by(Absence.start_date.desc(), Absence.id.desc()).all():
             candidates.append((absence.start_date, absence.start_time or time(9, 0), absence.kind, absence))
         candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
-        for _, _, kind, record in candidates:
+        for used_date, used_time, kind, record in candidates:
             worker = db.session.get(Worker, record.worker_id)
             if not worker:
                 continue
@@ -1265,7 +1288,16 @@ def create_app(test_config=None):
             else:
                 start_clock = record.start_time or time(9, 0)
                 end_clock = record.end_time or time(17, 0)
-                key = (kind, record.worker_id, worker.employer_id, start_clock, end_clock, bool(record.paid), str(record.paid_hours or ""))
+                key = (
+                    kind,
+                    record.worker_id,
+                    worker.employer_id,
+                    start_clock,
+                    end_clock,
+                    bool(record.paid),
+                    str(record.paid_hours or ""),
+                    getattr(record, "permit_category", None) or "",
+                )
                 start_minutes = start_clock.hour * 60 + start_clock.minute
                 end_minutes = end_clock.hour * 60 + end_clock.minute
                 recent = {
@@ -1285,12 +1317,18 @@ def create_app(test_config=None):
                     "permit_category": getattr(record, "permit_category", None) or "",
                     "color": "#d39a26" if kind == "vacation" else "#b84d55" if kind in {"health", "sickness"} else "#68777b",
                 }
-            if key in seen:
+            if key in pattern_index:
+                pattern_index[key]["usage_count"] += 1
                 continue
-            seen.add(key)
-            recent_patterns.append(recent)
-            if len(recent_patterns) >= recent_limit:
-                break
+            recent["usage_count"] = 1
+            recent["last_used_date"] = used_date
+            recent["last_used_time"] = used_time
+            pattern_index[key] = recent
+        recent_patterns = sorted(
+            pattern_index.values(),
+            key=lambda item: (item["usage_count"], item["last_used_date"], item["last_used_time"]),
+            reverse=True,
+        )[:recent_limit]
         recent_absences = []
         for absence in Absence.query.order_by(Absence.start_date.desc(), Absence.id.desc()).limit(12).all():
             worker = db.session.get(Worker, absence.worker_id)
@@ -2346,11 +2384,15 @@ def create_app(test_config=None):
         status = (request.form.get("status") or "pending").strip()
         if status not in {"pending", "paid"}:
             raise ValueError("Stato pagamento non valido")
+        payment_method = (request.form.get("payment_method") or "bank_transfer").strip()
+        if payment_method not in {"bank_transfer", "card_deposit", "cash", "other"}:
+            raise ValueError("Modalità di pagamento non valida")
         payment.worker_id = worker.id
         payment.employer_id = worker.employer_id
         payment.payment_type = payment_type
         payment.amount = nonnegative_decimal(request.form.get("amount"), "Importo")
         payment.status = status
+        payment.payment_method = payment_method
         raw_payment_date = (request.form.get("payment_date") or "").strip()
         payment.payment_date = _optional_date(raw_payment_date, "Data pagamento") if raw_payment_date else None
         if status == "paid" and payment.payment_date is None:
@@ -2570,7 +2612,15 @@ def create_app(test_config=None):
         query = Payment.query
         if worker_id:
             query = query.filter_by(worker_id=worker_id)
-        rows = query.order_by(Payment.created_at.desc(), Payment.id.desc()).all()
+        rows = query.all()
+
+        def payment_period_sort_key(payment):
+            period_date = payment.period_end or payment.period_start or payment.payment_date
+            if period_date is None and payment.created_at:
+                period_date = payment.created_at.date()
+            return (period_date or date.min, payment.period_start or date.min, payment.id)
+
+        rows.sort(key=payment_period_sort_key, reverse=True)
         workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
         pending_total = sum((Decimal(p.amount) for p in rows if p.status == "pending"), Decimal("0"))
         paid_total = sum((Decimal(p.amount) for p in rows if p.status == "paid"), Decimal("0"))
@@ -2579,6 +2629,7 @@ def create_app(test_config=None):
             payments=rows,
             workers=workers,
             payment_labels=PAYMENT_LABELS,
+            payment_method_labels=PAYMENT_METHOD_LABELS,
             selected_worker=worker_id,
             today=date.today().isoformat(),
             pending_total=pending_total,
@@ -2601,6 +2652,7 @@ def create_app(test_config=None):
             attachments=attachments,
             source_report=report,
             payment_labels=PAYMENT_LABELS,
+            payment_method_labels=PAYMENT_METHOD_LABELS,
         )
 
     @app.get("/payments/<int:payment_id>/receipt.pdf")
@@ -2620,6 +2672,7 @@ def create_app(test_config=None):
             employer,
             due_amount,
             PAYMENT_LABELS.get(payment.payment_type, payment.payment_type),
+            PAYMENT_METHOD_LABELS.get(payment.payment_method, payment.payment_method),
             _signature_path(employer),
         )
         audit(
@@ -2679,6 +2732,7 @@ def create_app(test_config=None):
             payment=payment,
             workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
             payment_labels=PAYMENT_LABELS,
+            payment_method_labels=PAYMENT_METHOD_LABELS,
         )
 
     @app.post("/payments/<int:payment_id>/delete")
@@ -2892,6 +2946,13 @@ def create_app(test_config=None):
         "other": "Altro",
     }
 
+    PAYMENT_METHOD_LABELS = {
+        "bank_transfer": "Bonifico bancario",
+        "card_deposit": "Deposito su carta",
+        "cash": "Contanti",
+        "other": "Altro",
+    }
+
     REPORT_TYPE_LABELS = {
         "it": {
             "monthly_payroll": "Cedolino mensile",
@@ -2946,16 +3007,28 @@ def create_app(test_config=None):
     def _archived_report_rows():
         rows = GeneratedReport.query.order_by(GeneratedReport.created_at.desc(), GeneratedReport.id.desc()).all()
         workers_by_id = {w.id: w for w in Worker.query.all()}
+        payment_report_types = {"monthly_payroll", "tfr", "thirteenth", "thirteenth_tfr"}
+        paid_by_report = {}
+        for payment in Payment.query.filter(
+            Payment.status == "paid",
+            Payment.source_report_id.isnot(None),
+        ).all():
+            paid_by_report.setdefault(payment.source_report_id, Decimal("0"))
+            paid_by_report[payment.source_report_id] += Decimal(payment.amount)
         enriched = []
         for report in rows:
             worker = workers_by_id.get(report.worker_id)
             approved, approval_source = _report_approval_state(report)
+            liquidated_amount = None
+            if report.report_type in payment_report_types:
+                liquidated_amount = paid_by_report.get(report.id, Decimal("0")).quantize(Decimal("0.01"))
             enriched.append({
                 "report": report,
                 "worker": worker,
                 "type_label": _report_type_label(report.report_type),
                 "approved": approved,
                 "approval_source": approval_source,
+                "liquidated_amount": liquidated_amount,
             })
         return enriched
 
@@ -3227,10 +3300,10 @@ def create_app(test_config=None):
         )
 
         archive_q = (request.args.get("archive_q") or "").strip()[:160]
-        archive_sort = request.args.get("archive_sort", "created")
+        archive_sort = request.args.get("archive_sort", "period")
         archive_dir = request.args.get("archive_dir", "desc")
-        if archive_sort not in {"created", "type", "file", "period", "status"}:
-            archive_sort = "created"
+        if archive_sort not in {"created", "type", "file", "period", "liquidated", "status"}:
+            archive_sort = "period"
         if archive_dir not in {"asc", "desc"}:
             archive_dir = "desc"
         archive_page = max(1, request.args.get("archive_page", 1, type=int) or 1)
@@ -3249,6 +3322,7 @@ def create_app(test_config=None):
                         report.created_at.strftime("%d/%m/%Y %H:%M") if report.created_at else "",
                         report.period_start.isoformat() if report.period_start else "",
                         report.period_end.isoformat() if report.period_end else "",
+                        str(row["liquidated_amount"]) if row["liquidated_amount"] is not None else "",
                         "Approvato" if row["approved"] else "Non approvato",
                         worker.first_name if worker else "",
                         worker.last_name if worker else "",
@@ -3266,7 +3340,11 @@ def create_app(test_config=None):
             if archive_sort == "file":
                 return (report.filename.casefold(), report.id)
             if archive_sort == "period":
-                return (report.period_start or date.min, report.period_end or date.min, report.id)
+                period_date = report.period_end or report.period_start or date.min
+                return (period_date, report.period_start or date.min, report.id)
+            if archive_sort == "liquidated":
+                amount = row["liquidated_amount"]
+                return (amount is not None, amount or Decimal("0"), report.id)
             if archive_sort == "status":
                 return (1 if row["approved"] else 0, report.id)
             return (report.created_at or datetime.min, report.id)
@@ -3292,7 +3370,7 @@ def create_app(test_config=None):
         archive_prev_url = url_for("reports", **common_archive_args, archive_page=archive_page - 1) if archive_page > 1 else None
         archive_next_url = url_for("reports", **common_archive_args, archive_page=archive_page + 1) if archive_page < archive_pages else None
         archive_sort_urls = {}
-        for column in ("created", "type", "file", "period", "status"):
+        for column in ("created", "type", "file", "period", "liquidated", "status"):
             direction = "asc" if archive_sort != column or archive_dir == "desc" else "desc"
             archive_sort_urls[column] = url_for(
                 "reports", **{**common_archive_args, "archive_sort": column, "archive_dir": direction}, archive_page=1

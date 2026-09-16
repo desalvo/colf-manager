@@ -17,6 +17,7 @@ from reportlab.platypus import Image as RLImage, Paragraph, SimpleDocTemplate, S
 from PIL import Image as PILImage
 
 from . import __author__, __build__, __version__
+from .formatting import currency
 
 BRAND = colors.HexColor("#173f3a")
 ACCENT = colors.HexColor("#287d70")
@@ -108,7 +109,7 @@ def _kv_table(rows):
 
 
 def _money(v):
-    return f"€ {v}"
+    return currency(v)
 
 
 def _fiscal_story(fiscal, styles):
@@ -279,7 +280,23 @@ def _amount_callout(due_amount, paid_amount=None, residual_amount=None, styles=N
     return table
 
 
-def payment_receipt_pdf(payment, worker, employer, due_amount, payment_label, employer_signature=None):
+PAYMENT_METHOD_LABELS = {
+    "bank_transfer": "Bonifico bancario",
+    "card_deposit": "Deposito su carta",
+    "cash": "Contanti",
+    "other": "Altro",
+}
+
+
+def payment_receipt_pdf(
+    payment,
+    worker,
+    employer,
+    due_amount,
+    payment_label,
+    payment_method_label,
+    employer_signature=None,
+):
     """Create a professional receipt for one payment marked as paid."""
     out, doc = _doc(f"Quietanza pagamento #{payment.id}")
     styles = _styles()
@@ -305,6 +322,7 @@ def payment_receipt_pdf(payment, worker, employer, due_amount, payment_label, em
             ["Data pagamento", payment_date.strftime("%d/%m/%Y")],
             ["Periodo di riferimento", period],
             ["Categoria", payment_label],
+            ["Modalità di pagamento", payment_method_label],
             ["Importo dovuto", _money(due)],
             ["Importo effettivamente pagato", _money(paid)],
             ["Residuo dopo questo pagamento", _money(residual)],
@@ -361,7 +379,7 @@ def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrat
         story.append(_amount_callout(Decimal(due_amount), paid_total, residual, styles))
         story.append(Spacer(1, 5))
     if payments:
-        rows = [["Tipo", "Stato", "Data", "Importo", "Periodo"]]
+        rows = [["Tipo", "Stato", "Data", "Modalità", "Importo", "Periodo"]]
         for payment in payments:
             period = ""
             if payment.period_start:
@@ -372,10 +390,14 @@ def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrat
                 labels.get(payment.payment_type, payment.payment_type),
                 "Pagato" if payment.status == "paid" else "Da pagare",
                 payment.payment_date.strftime("%d/%m/%Y") if payment.payment_date else "—",
+                PAYMENT_METHOD_LABELS.get(
+                    getattr(payment, "payment_method", "bank_transfer"),
+                    getattr(payment, "payment_method", "bank_transfer"),
+                ),
                 _money(payment.amount),
                 period or "—",
             ])
-        table = Table(rows, colWidths=[36*mm, 25*mm, 28*mm, 30*mm, 45*mm], repeatRows=1)
+        table = Table(rows, colWidths=[31*mm, 22*mm, 24*mm, 31*mm, 25*mm, 39*mm], repeatRows=1)
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), ACCENT),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -678,7 +700,7 @@ def annual_payments_pdf(payments, workers, employers, year):
     grand_total = sum((Decimal(payment.amount) for payment in paid), Decimal("0"))
     totals.append(["Totale annuale", _money(grand_total)])
     story.extend([_kv_table(totals), Spacer(1, 9), Paragraph("Dettaglio pagamenti", s["CMSub"])])
-    rows = [["Data", "Lavoratore", "Datore", "Categoria", "Importo", "Periodo"]]
+    rows = [["Data", "Lavoratore", "Datore", "Categoria", "Modalità", "Importo", "Periodo"]]
     for payment in sorted(paid, key=lambda item: (item.payment_date, item.id)):
         worker = worker_map.get(payment.worker_id)
         employer = employer_map.get(payment.employer_id)
@@ -694,20 +716,28 @@ def annual_payments_pdf(payments, workers, employers, year):
             worker_name,
             employer_name,
             labels.get(payment.payment_type, payment.payment_type),
+            PAYMENT_METHOD_LABELS.get(
+                getattr(payment, "payment_method", "bank_transfer"),
+                getattr(payment, "payment_method", "bank_transfer"),
+            ),
             _money(payment.amount),
             period,
         ])
     if len(rows) == 1:
         story.append(Paragraph("Nessun pagamento effettuato nell'anno selezionato.", s["CMNote"]))
     else:
-        table = Table(rows, colWidths=[20*mm, 32*mm, 32*mm, 31*mm, 25*mm, 35*mm], repeatRows=1)
+        table = Table(
+            rows,
+            colWidths=[18*mm, 27*mm, 27*mm, 27*mm, 28*mm, 22*mm, 31*mm],
+            repeatRows=1,
+        )
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), BRAND),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]),
             ("GRID", (0, 0), (-1, -1), 0.3, LINE),
-            ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+            ("ALIGN", (5, 1), (5, -1), "RIGHT"),
             ("FONTSIZE", (0, 0), (-1, -1), 6.2),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("PADDING", (0, 0), (-1, -1), 3),
@@ -788,7 +818,7 @@ def combined_thirteenth_tfr_pdf(worker, employer, combined, year, rule_notes, ap
     s = _styles()
     th = combined["thirteenth"]
     tfr = combined["tfr"]
-    story=[Paragraph("Prospetto cumulativo tredicesima + TFR",s["CMTitle"]),Paragraph(f"Anno {year} · fino al {combined['cutoff'].strftime('%d/%m/%Y')}",s["CMSub"]),_party_block(worker,employer,s),Spacer(1,7),_kv_table([["Voce","Importo"],["Retribuzione utile registrata",_money(th["gross"])],["Tredicesima maturata (retribuzione / 12)",_money(th["thirteenth"])],["Base utile TFR stimata",_money(tfr["tfr_useful_compensation"])],["TFR maturato (base utile / 13,5)",_money(tfr["tfr_accrual"])],["Totale tredicesima + TFR",_money(th["thirteenth"]+tfr["tfr_accrual"])]]),Paragraph("Descrizione dei calcoli",s["CMSub"]),Paragraph(f"Tredicesima: {th['gross']} / 12 = {th['thirteenth']}. TFR: base utile {tfr['tfr_useful_compensation']} / 13,5 = {tfr['tfr_accrual']}. Il periodo termina il {combined['cutoff'].strftime('%d/%m/%Y')}.",s["CMBody"])]
+    story=[Paragraph("Prospetto cumulativo tredicesima + TFR",s["CMTitle"]),Paragraph(f"Anno {year} · fino al {combined['cutoff'].strftime('%d/%m/%Y')}",s["CMSub"]),_party_block(worker,employer,s),Spacer(1,7),_kv_table([["Voce","Importo"],["Retribuzione utile registrata",_money(th["gross"])],["Tredicesima maturata (retribuzione / 12)",_money(th["thirteenth"])],["Base utile TFR stimata",_money(tfr["tfr_useful_compensation"])],["TFR maturato (base utile / 13,5)",_money(tfr["tfr_accrual"])],["Totale tredicesima + TFR",_money(th["thirteenth"]+tfr["tfr_accrual"])]]),Paragraph("Descrizione dei calcoli",s["CMSub"]),Paragraph(f"Tredicesima: {_money(th['gross'])} / 12 = {_money(th['thirteenth'])}. TFR: base utile {_money(tfr['tfr_useful_compensation'])} / 13,5 = {_money(tfr['tfr_accrual'])}. Il periodo termina il {combined['cutoff'].strftime('%d/%m/%Y')}.",s["CMBody"])]
     for note in rule_notes:
         story.append(Paragraph("• " + note, s["CMBody"]))
     story += _fiscal_story({"inps":combined.get("inps"),"taxes":combined.get("taxes")},s)

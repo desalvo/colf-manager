@@ -109,6 +109,40 @@
       };
       window.addEventListener('resize', syncResponsiveNavigation);
     })();
+
+    (() => {
+      const cookieName = 'cm_collapsible_state';
+      const maxAge = 60 * 60 * 24 * 365;
+      const readState = () => {
+        const item = document.cookie.split('; ').find(part => part.startsWith(`${cookieName}=`));
+        if (!item) return {};
+        try {
+          return JSON.parse(decodeURIComponent(item.slice(cookieName.length + 1))) || {};
+        } catch (_) {
+          return {};
+        }
+      };
+      const writeState = (state) => {
+        const encoded = encodeURIComponent(JSON.stringify(state));
+        document.cookie = `${cookieName}=${encoded}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+      };
+      const state = readState();
+      document.querySelectorAll('details.collapsible-card').forEach((details, index) => {
+        const key = details.dataset.collapseKey || details.id || `${location.pathname}:section-${index}`;
+        const defaultOpen = details.hasAttribute('open');
+        details.dataset.collapseKey = key;
+        details.dataset.defaultOpen = defaultOpen ? '1' : '0';
+        if (Object.prototype.hasOwnProperty.call(state, key)) {
+          details.open = state[key] === 1;
+        }
+        details.addEventListener('toggle', () => {
+          const isDefault = details.open === defaultOpen;
+          if (isDefault) delete state[key];
+          else state[key] = details.open ? 1 : 0;
+          writeState(state);
+        });
+      });
+    })();
   </script>
   {% block scripts %}{% endblock %}
 </body>

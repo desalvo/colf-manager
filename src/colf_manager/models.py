@@ -246,6 +246,10 @@ class Payment(db.Model):
             name="ck_payment_type",
         ),
         CheckConstraint("status IN ('pending','paid')", name="ck_payment_status"),
+        CheckConstraint(
+            "payment_method IN ('bank_transfer','card_deposit','cash','other')",
+            name="ck_payment_method",
+        ),
     )
     id = db.Column(db.Integer, primary_key=True)
     worker_id = db.Column(db.Integer, db.ForeignKey("worker.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -254,6 +258,7 @@ class Payment(db.Model):
     payment_type = db.Column(db.String(40), nullable=False, index=True)
     amount = db.Column(db.Numeric(12, 2), nullable=False)
     status = db.Column(db.String(20), default="pending", nullable=False, index=True)
+    payment_method = db.Column(db.String(20), default="bank_transfer", nullable=False, index=True)
     payment_date = db.Column(db.Date)
     period_start = db.Column(db.Date, index=True)
     period_end = db.Column(db.Date, index=True)

@@ -1,5 +1,41 @@
 # Changelog
 
+## r96-full - direct calendar navigation and usage-ranked shortcuts
+
+- Added explicit day/month/year controls to jump directly to any calendar date while preserving the selected calendar view.
+- Drag-and-drop quick choices are now ranked by usage frequency, using most recent use as the tie-breaker.
+- Quick permit patterns preserve their permit category when dragged onto the calendar.
+- Annual payment totals keep the Italian display format (`100,00`) and expose the canonical two-decimal value (`100.00`) as machine-readable markup, fixing the existing report regression test without changing the UI format.
+
+
+## r95-full - richer archived reports and persistent collapsible state
+
+- Archived reports show the paid/liquidated amount when the report type generates payments.
+- Archived report actions use compact icon controls and approval is represented graphically with accessible hints.
+- Annual summary and archived reports are collapsible and closed by default.
+- All collapsible application sections persist user open/closed overrides in a cookie, while retaining template defaults when unchanged.
+
+
+## r94-full - default period ordering
+
+- Payment history now defaults to period descending, with the most recent period first.
+- Archived reports now default to period descending, with the most recent period first.
+- Manual column sorting remains available for archived reports.
+
+## r93-full - payment method tracking
+
+- Added payment method to payments with Bank transfer as the default.
+- Supported methods: bank transfer, card deposit, cash and other.
+- Existing payments are migrated to bank transfer.
+- Payment method is shown in payment forms/details, receipts and payment reports.
+
+
+## r92-full - consistent two-decimal currency formatting
+
+- Formats monetary values in Report e paghe and generated PDF reports with exactly two decimal digits.
+- Uses Italian comma decimal separator consistently (for example € 10,00 and € 125,50).
+- Adds regression coverage for the shared currency formatter and report rendering.
+
 ## r91-full - final Ruff formatter cleanup
 
 - Formatted `src/colf_manager/storage.py` exactly as required by the Ruff formatter.

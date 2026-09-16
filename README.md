@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r91-full
+# colf-manager 1.0.0 · build r96-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -90,7 +90,7 @@ From **Settings**, administrators can configure the external application URL and
 ### r55 - reports, signatures and payments
 - PDF reports now show the application logo, version/build and author on every page, with refreshed professional styling and inline archive viewing.
 - Optional worker/employer graphic signatures can be uploaded from their records (PNG, JPEG, TIFF, WEBP, BMP) and automatically embedded when signatures are requested.
-- A Payments register supports manual entries and automatic residual tracking from generated reports: salary, INPS contributions, thirteenth-month salary, TFR, reimbursements and other payments, with status, date, period, notes and attachments.
+- A Payments register supports manual entries and automatic residual tracking from generated reports: salary, INPS contributions, thirteenth-month salary, TFR, reimbursements and other payments, with status, payment method (Bank transfer by default, Card deposit, Cash or Other), date, period, notes and attachments.
 - INPS contribution payments are available only when the worker has a recorded INPS position.
 - Full export/import includes signatures, payments and payment attachments in addition to database, documents and reports.
 

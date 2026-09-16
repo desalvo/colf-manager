@@ -107,7 +107,7 @@ Dalla r62 il calendario distingue **Ore ordinarie**, **Ore straordinarie**, **Ma
 
 ## Novità r42: drag & drop e andamento ore per luogo
 
-Nel calendario gli inserimenti recenti sono disponibili in una colonna dedicata a destra sotto forma di elementi grafici trascinabili. Il rilascio su un nuovo giorno conserva tipo di registrazione, orari di inizio/fine, lavoratore, relazione con il datore, luogo e pausa; per ferie e malattia conserva anche lo stato retribuito e le ore pagate configurate. I colori degli eventi sono coerenti nelle viste mese, settimana e giorno.
+Nel calendario le scelte rapide drag & drop sono disponibili in una colonna dedicata a destra, ordinate per frequenza d’uso (a parità, prima la più recente). Il rilascio su un nuovo giorno conserva tipo di registrazione, orari di inizio/fine, lavoratore, relazione con il datore, luogo e pausa; per i permessi conserva anche la categoria. I controlli Giorno, Mese e Anno consentono di saltare direttamente a una data specifica senza cambiare la vista calendario selezionata. I colori degli eventi sono coerenti nelle viste mese, settimana e giorno.
 
 Nella pagina Report, quando è presente un solo lavoratore questo viene selezionato automaticamente. È inoltre disponibile il PDF **Andamento ore per luogo**, con totale annuale e dettaglio mensile delle ore retribuite distinte per luogo.
 

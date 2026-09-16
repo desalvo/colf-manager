@@ -91,7 +91,7 @@ from .reporting import (
     combined_thirteenth_tfr_pdf,
     payment_receipt_pdf,
 )
-from .storage import cleanup_orphan_files, safe_unlink, store_report
+from .storage import cleanup_orphan_files, normalize_archived_report_filenames, safe_unlink, store_report
 from .mailer import send_smtp_message
 from .validation import (
     nonnegative_decimal,
@@ -206,6 +206,7 @@ def _initialize_database(admin_password, testing):
             lock_connection.commit()
 
         _ensure_legacy_schema_compatibility()
+        normalize_archived_report_filenames(current_app)
 
         if not User.query.first():
             password = (
@@ -329,6 +330,13 @@ def _ensure_legacy_schema_compatibility():
         for statement in statements:
             db.session.execute(text(statement))
         if statements:
+            db.session.commit()
+
+    inspector = inspect(db.engine)
+    if "generated_report" in inspector.get_table_names():
+        columns = {c["name"] for c in inspector.get_columns("generated_report")}
+        if "approval_override" not in columns:
+            db.session.execute(text("ALTER TABLE generated_report ADD COLUMN approval_override BOOLEAN"))
             db.session.commit()
 
     inspector = inspect(db.engine)
@@ -2402,6 +2410,110 @@ def create_app(test_config=None):
             pass
         return fallback
 
+    def _monthly_payroll_reports_for_payment(payment):
+        """Return archived monthly payrolls affected by this payment.
+
+        Prefer the explicit source report, then add any archived monthly payroll
+        whose month contains the payment period/date. Multiple archived copies of
+        the same month are refreshed to keep the document archive coherent.
+        """
+        reports = []
+        seen = set()
+
+        def add(report):
+            if report and report.report_type == "monthly_payroll" and report.worker_id == payment.worker_id and report.id not in seen:
+                reports.append(report)
+                seen.add(report.id)
+
+        if payment.source_report_id:
+            add(db.session.get(GeneratedReport, payment.source_report_id))
+
+        reference = None
+        if payment.period_start and payment.period_end:
+            if payment.period_start.year == payment.period_end.year and payment.period_start.month == payment.period_end.month:
+                reference = payment.period_end
+        elif payment.period_start:
+            reference = payment.period_start
+        elif payment.period_end:
+            reference = payment.period_end
+        elif payment.payment_date:
+            reference = payment.payment_date
+
+        if reference:
+            month_start = date(reference.year, reference.month, 1)
+            month_end = date(reference.year, reference.month, monthrange(reference.year, reference.month)[1])
+            for report in GeneratedReport.query.filter_by(
+                worker_id=payment.worker_id, report_type="monthly_payroll"
+            ).filter(
+                GeneratedReport.period_start == month_start,
+                GeneratedReport.period_end == month_end,
+            ).all():
+                add(report)
+        return reports
+
+    def _replace_archived_report_payload(report, payload):
+        """Replace one archived report file while preserving its database id."""
+        digest = hashlib.sha256(payload).hexdigest()
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        stored_name = f"{timestamp}-{digest[:16]}-r{report.id}-{report.filename}"
+        destination = Path(app.config["REPORT_FOLDER"]) / stored_name
+        destination.write_bytes(payload)
+        old_stored_name = report.stored_name
+        report.stored_name = stored_name
+        report.sha256 = digest
+        report.size_bytes = len(payload)
+        report.mime_type = "application/pdf"
+        return old_stored_name, stored_name
+
+    def _refresh_monthly_payroll_reports(reports):
+        """Regenerate archived monthly payrolls in place using current payments.
+
+        The caller owns the surrounding DB transaction. New files are written
+        before commit; the returned file pairs let the caller remove the obsolete
+        files only after a successful commit, or remove new files after rollback.
+        """
+        replacements = []
+        for report in reports:
+            if not report.period_start or not report.period_end or report.report_type != "monthly_payroll":
+                continue
+            worker = db.session.get(Worker, report.worker_id) if report.worker_id else None
+            if worker is None:
+                continue
+            year, month = report.period_start.year, report.period_start.month
+            summary = get_summary(worker.id, year, month)
+            _, _, absences_list, expenses_list, _ = _worker_data(worker.id)
+            vacation = vacation_balance(worker, absences_list, year, min(date.today(), date(year, 12, 31)))
+            fiscal = _fiscal_data(worker, summary, year)
+            period_payments = _payments_for_period(worker.id, report.period_start, report.period_end)
+            buffer = payroll_pdf(
+                worker,
+                summary,
+                year,
+                month,
+                _employer_for(worker),
+                vacation,
+                fiscal,
+                [
+                    item
+                    for item in expenses_list
+                    if _expense_relevant_to_period(item, report.period_start, report.period_end)
+                ],
+                approval=_report_approval(worker, "both"),
+                payments=period_payments,
+                permits=permit_metrics(worker, absences_list, year, report.period_end),
+                sickness=sickness_metrics(worker, absences_list, year, report.period_end),
+            )
+            payload = buffer.getvalue() if hasattr(buffer, "getvalue") else buffer.read()
+            old_name, new_name = _replace_archived_report_payload(report, payload)
+            replacements.append((old_name, new_name, report.id))
+        return replacements
+
+    def _cleanup_report_replacements(replacements, committed):
+        for old_name, new_name, _ in replacements:
+            target = old_name if committed else new_name
+            if target:
+                safe_unlink(Path(app.config["REPORT_FOLDER"]) / target)
+
     def _add_payment_attachments(payment):
         added = []
         for uploaded in request.files.getlist("attachments"):
@@ -2426,17 +2538,33 @@ def create_app(test_config=None):
     @login_required
     def payments():
         if request.method == "POST":
+            replacements = []
             try:
                 payment = _payment_from_form()
                 db.session.add(payment)
                 db.session.flush()
                 _add_payment_attachments(payment)
+                affected_reports = _monthly_payroll_reports_for_payment(payment)
+                replacements = _refresh_monthly_payroll_reports(affected_reports)
                 db.session.commit()
+                _cleanup_report_replacements(replacements, committed=True)
                 audit("payment_created", "payment", payment.id, payment.payment_type)
-                flash("Pagamento registrato", "success")
+                for _, _, report_id in replacements:
+                    audit(
+                        "monthly_payroll_refreshed",
+                        "generated_report",
+                        report_id,
+                        f"payment={payment.id}; action=create; status={payment.status}; amount={payment.amount}",
+                    )
+                flash(
+                    "Pagamento registrato"
+                    + (" e cedolino archiviato aggiornato" if replacements else ""),
+                    "success",
+                )
                 return redirect(url_for("payment_detail", payment_id=payment.id))
             except (ValueError, OSError) as exc:
                 db.session.rollback()
+                _cleanup_report_replacements(replacements, committed=False)
                 flash(str(exc), "error")
         worker_id = request.args.get("worker_id", type=int)
         query = Payment.query
@@ -2512,15 +2640,39 @@ def create_app(test_config=None):
     def payment_edit(payment_id):
         payment = db.get_or_404(Payment, payment_id)
         if request.method == "POST":
+            replacements = []
             try:
+                previous_reports = _monthly_payroll_reports_for_payment(payment)
                 _payment_from_form(payment)
                 _add_payment_attachments(payment)
+                db.session.flush()
+                current_reports = _monthly_payroll_reports_for_payment(payment)
+                affected_reports = []
+                seen_report_ids = set()
+                for report in [*previous_reports, *current_reports]:
+                    if report.id not in seen_report_ids:
+                        affected_reports.append(report)
+                        seen_report_ids.add(report.id)
+                replacements = _refresh_monthly_payroll_reports(affected_reports)
                 db.session.commit()
+                _cleanup_report_replacements(replacements, committed=True)
                 audit("payment_updated", "payment", payment.id, payment.payment_type)
-                flash("Pagamento aggiornato", "success")
+                for _, _, report_id in replacements:
+                    audit(
+                        "monthly_payroll_refreshed",
+                        "generated_report",
+                        report_id,
+                        f"payment={payment.id}; action=update; status={payment.status}; amount={payment.amount}",
+                    )
+                flash(
+                    "Pagamento aggiornato"
+                    + (" e cedolino archiviato sostituito" if replacements else ""),
+                    "success",
+                )
                 return redirect(url_for("payment_detail", payment_id=payment.id))
             except (ValueError, OSError) as exc:
                 db.session.rollback()
+                _cleanup_report_replacements(replacements, committed=False)
                 flash(str(exc), "error")
         return render_template(
             "payment_edit.html",
@@ -2536,19 +2688,40 @@ def create_app(test_config=None):
         deleted_type = payment.payment_type
         deleted_amount = Decimal(payment.amount)
         deleted_status = payment.status
+        affected_reports = _monthly_payroll_reports_for_payment(payment)
+        replacements = []
         attachments = PaymentAttachment.query.filter_by(payment_id=payment.id).all()
-        for attachment in attachments:
-            safe_unlink(Path(app.config["PAYMENT_FOLDER"]) / attachment.stored_name)
-            db.session.delete(attachment)
-        db.session.delete(payment)
-        db.session.commit()
+        try:
+            for attachment in attachments:
+                safe_unlink(Path(app.config["PAYMENT_FOLDER"]) / attachment.stored_name)
+                db.session.delete(attachment)
+            db.session.delete(payment)
+            db.session.flush()
+            replacements = _refresh_monthly_payroll_reports(affected_reports)
+            db.session.commit()
+            _cleanup_report_replacements(replacements, committed=True)
+        except (ValueError, OSError):
+            db.session.rollback()
+            _cleanup_report_replacements(replacements, committed=False)
+            raise
         audit(
             "payment_deleted",
             "payment",
             payment_id,
             f"type={deleted_type}; amount={deleted_amount}; previous_status={deleted_status}",
         )
-        flash("Pagamento eliminato: l'importo non risulta più pagato nei riepiloghi e nei report", "success")
+        for _, _, report_id in replacements:
+            audit(
+                "monthly_payroll_refreshed",
+                "generated_report",
+                report_id,
+                f"payment={payment_id}; action=delete; previous_status={deleted_status}; amount={deleted_amount}",
+            )
+        flash(
+            "Pagamento eliminato: l'importo non risulta più pagato nei riepiloghi e nei report"
+            + ("; il cedolino archiviato è stato sostituito" if replacements else ""),
+            "success",
+        )
         return redirect(url_for("payments"))
 
     @app.get("/payments/attachments/<int:attachment_id>")
@@ -2718,6 +2891,73 @@ def create_app(test_config=None):
         "expense_refund": "Rimborso spese",
         "other": "Altro",
     }
+
+    REPORT_TYPE_LABELS = {
+        "it": {
+            "monthly_payroll": "Cedolino mensile",
+            "annual_payroll": "Cedolino globale annuale",
+            "courtesy_cu": "CU di cortesia annuale",
+            "tfr": "TFR",
+            "thirteenth": "Cedolino tredicesima",
+            "thirteenth_tfr": "Tredicesima + TFR",
+            "trend": "Andamento ore e retribuzioni",
+            "location_trend": "Andamento ore per luogo",
+            "annual_payments": "Pagamenti effettuati nell’anno",
+        },
+        "en": {
+            "monthly_payroll": "Monthly payslip",
+            "annual_payroll": "Annual payroll summary",
+            "courtesy_cu": "Annual courtesy income statement",
+            "tfr": "TFR severance report",
+            "thirteenth": "Thirteenth-month payslip",
+            "thirteenth_tfr": "Thirteenth month + TFR",
+            "trend": "Hours and pay trend",
+            "location_trend": "Hours by workplace",
+            "annual_payments": "Annual payments report",
+        },
+    }
+
+    def _report_type_label(report_type):
+        locale = getattr(current_user, "locale", "it") if current_user.is_authenticated else "it"
+        labels = REPORT_TYPE_LABELS.get(locale, REPORT_TYPE_LABELS["it"])
+        return labels.get(report_type, report_type.replace("_", " ").strip().title())
+
+    def _monthly_report_auto_approved(report):
+        if report.report_type != "monthly_payroll" or not report.worker_id or not report.period_start or not report.period_end:
+            return False
+        start, end = report.period_start, report.period_end
+        expected_end = date(start.year, start.month, monthrange(start.year, start.month)[1])
+        if start.day != 1 or end != expected_end:
+            return False
+        try:
+            due = Decimal(get_summary(report.worker_id, start.year, start.month)["payable"]).quantize(Decimal("0.01"))
+        except (ValueError, TypeError, ArithmeticError):
+            return False
+        payments = _payments_for_period(report.worker_id, start, end, payment_types={"salary"})
+        paid = sum((Decimal(p.amount) for p in payments if p.status == "paid"), Decimal("0")).quantize(Decimal("0.01"))
+        return bool(payments) and paid >= due
+
+    def _report_approval_state(report):
+        auto = _monthly_report_auto_approved(report)
+        if report.approval_override is None:
+            return auto, "auto"
+        return bool(report.approval_override), "manual"
+
+    def _archived_report_rows():
+        rows = GeneratedReport.query.order_by(GeneratedReport.created_at.desc(), GeneratedReport.id.desc()).all()
+        workers_by_id = {w.id: w for w in Worker.query.all()}
+        enriched = []
+        for report in rows:
+            worker = workers_by_id.get(report.worker_id)
+            approved, approval_source = _report_approval_state(report)
+            enriched.append({
+                "report": report,
+                "worker": worker,
+                "type_label": _report_type_label(report.report_type),
+                "approved": approved,
+                "approval_source": approval_source,
+            })
+        return enriched
 
     def _payments_for_period(worker_id, period_start=None, period_end=None, payment_types=None):
         rows = Payment.query.filter_by(worker_id=worker_id).order_by(Payment.created_at, Payment.id).all()
@@ -2903,22 +3143,50 @@ def create_app(test_config=None):
             flash(str(exc), "error")
         selected = db.session.get(Worker, worker_id) if worker_id else None
         selected_employer = _employer_for(selected) if selected else None
-        permit_overview = (
-            permit_metrics(
+        period_start = date(year, month, 1) if month in range(1, 13) else None
+        period_end = date(year, month, monthrange(year, month)[1]) if period_start else None
+        permit_overview = []
+        if selected:
+            worker_absences = Absence.query.filter_by(worker_id=worker_id).all()
+            permit_overview = permit_metrics(
                 selected,
-                Absence.query.filter_by(worker_id=worker_id).all(),
+                worker_absences,
                 year,
                 min(date.today(), date(year, 12, 31)),
             )
-            if selected
+            if period_end:
+                selected_month_metrics = {
+                    item["category"]: item
+                    for item in permit_metrics(selected, worker_absences, year, period_end)
+                }
+                for item in permit_overview:
+                    month_metric = selected_month_metrics.get(item["category"])
+                    if month_metric:
+                        item["paid_month"] = month_metric["paid_month"]
+                        item["unpaid_month"] = month_metric["unpaid_month"]
+                        item["extra_paid_month"] = month_metric["extra_paid_month"]
+        default_place = (
+            (selected_employer.city or selected_employer.address or "")
+            if selected_employer
+            else ""
+        )
+        period_payments = (
+            _payments_for_period(worker_id, period_start, period_end)
+            if worker_id and period_start
             else []
         )
-        default_place = (selected_employer.city or selected_employer.address or "") if selected_employer else ""
-        period_start = date(year, month, 1) if month in range(1, 13) else None
-        period_end = date(year, month, monthrange(year, month)[1]) if period_start else None
-        period_payments = _payments_for_period(worker_id, period_start, period_end) if worker_id and period_start else []
-        paid_salary = sum((p.amount for p in period_payments if p.status == "paid" and p.payment_type == "salary"), Decimal("0"))
-        residual_salary = max(Decimal("0"), (summary["payable"] if summary else Decimal("0")) - paid_salary)
+        paid_salary = sum(
+            (
+                p.amount
+                for p in period_payments
+                if p.status == "paid" and p.payment_type == "salary"
+            ),
+            Decimal("0"),
+        )
+        residual_salary = max(
+            Decimal("0"),
+            (summary["payable"] if summary else Decimal("0")) - paid_salary,
+        )
         annual_paid_payments = _paid_payments_in_year(year, worker_id) if worker_id else []
         annual_payment_totals = _payment_totals(annual_paid_payments)
         annual_residual_salary = max(
@@ -2935,6 +3203,101 @@ def create_app(test_config=None):
             (Decimal(str(item.get("unpaid_year") or 0)) for item in permit_overview),
             Decimal("0"),
         )
+        monthly_permit_paid_hours = sum(
+            (Decimal(str(item.get("paid_month") or 0)) for item in permit_overview),
+            Decimal("0"),
+        )
+        monthly_permit_unpaid_hours = sum(
+            (Decimal(str(item.get("unpaid_month") or 0)) for item in permit_overview),
+            Decimal("0"),
+        )
+        monthly_total_hours = (
+            Decimal(str(summary["worked_hours"]))
+            + monthly_permit_paid_hours
+            + monthly_permit_unpaid_hours
+            if summary
+            else Decimal("0")
+        )
+        annual_total_hours = (
+            Decimal(str(annual["worked_hours"]))
+            + annual_permit_paid_hours
+            + annual_permit_unpaid_hours
+            if annual
+            else Decimal("0")
+        )
+
+        archive_q = (request.args.get("archive_q") or "").strip()[:160]
+        archive_sort = request.args.get("archive_sort", "created")
+        archive_dir = request.args.get("archive_dir", "desc")
+        if archive_sort not in {"created", "type", "file", "period", "status"}:
+            archive_sort = "created"
+        if archive_dir not in {"asc", "desc"}:
+            archive_dir = "desc"
+        archive_page = max(1, request.args.get("archive_page", 1, type=int) or 1)
+        archive_rows = _archived_report_rows()
+        if archive_q:
+            token = archive_q.casefold()
+            filtered = []
+            for row in archive_rows:
+                report = row["report"]
+                worker = row["worker"]
+                haystack = " ".join(
+                    part for part in [
+                        row["type_label"],
+                        report.report_type,
+                        report.filename,
+                        report.created_at.strftime("%d/%m/%Y %H:%M") if report.created_at else "",
+                        report.period_start.isoformat() if report.period_start else "",
+                        report.period_end.isoformat() if report.period_end else "",
+                        "Approvato" if row["approved"] else "Non approvato",
+                        worker.first_name if worker else "",
+                        worker.last_name if worker else "",
+                        worker.fiscal_code if worker else "",
+                    ] if part
+                ).casefold()
+                if token in haystack:
+                    filtered.append(row)
+            archive_rows = filtered
+
+        def archive_sort_key(row):
+            report = row["report"]
+            if archive_sort == "type":
+                return (row["type_label"].casefold(), report.id)
+            if archive_sort == "file":
+                return (report.filename.casefold(), report.id)
+            if archive_sort == "period":
+                return (report.period_start or date.min, report.period_end or date.min, report.id)
+            if archive_sort == "status":
+                return (1 if row["approved"] else 0, report.id)
+            return (report.created_at or datetime.min, report.id)
+
+        archive_rows.sort(key=archive_sort_key, reverse=archive_dir == "desc")
+        archive_total = len(archive_rows)
+        archive_pages = max(1, (archive_total + 9) // 10)
+        archive_page = min(archive_page, archive_pages)
+        start_index = (archive_page - 1) * 10
+        archived_reports = archive_rows[start_index : start_index + 10]
+
+        common_archive_args = {
+            "worker_id": worker_id,
+            "year": year,
+            "month": month,
+            "approval": request.args.get("approval", "both"),
+            "signature_place": request.args.get("signature_place", default_place),
+            "report_date": request.args.get("report_date", today.isoformat()),
+            "archive_q": archive_q or None,
+            "archive_sort": archive_sort,
+            "archive_dir": archive_dir,
+        }
+        archive_prev_url = url_for("reports", **common_archive_args, archive_page=archive_page - 1) if archive_page > 1 else None
+        archive_next_url = url_for("reports", **common_archive_args, archive_page=archive_page + 1) if archive_page < archive_pages else None
+        archive_sort_urls = {}
+        for column in ("created", "type", "file", "period", "status"):
+            direction = "asc" if archive_sort != column or archive_dir == "desc" else "desc"
+            archive_sort_urls[column] = url_for(
+                "reports", **{**common_archive_args, "archive_sort": column, "archive_dir": direction}, archive_page=1
+            )
+
         return render_template(
             "reports.html",
             workers=workers,
@@ -2947,7 +3310,16 @@ def create_app(test_config=None):
             approval=request.args.get("approval", "both"),
             signature_place=request.args.get("signature_place", default_place),
             report_date=request.args.get("report_date", today.isoformat()),
-            archived_reports=GeneratedReport.query.order_by(GeneratedReport.created_at.desc()).limit(100).all(),
+            archived_reports=archived_reports,
+            archive_q=archive_q,
+            archive_sort=archive_sort,
+            archive_dir=archive_dir,
+            archive_page=archive_page,
+            archive_pages=archive_pages,
+            archive_total=archive_total,
+            archive_prev_url=archive_prev_url,
+            archive_next_url=archive_next_url,
+            archive_sort_urls=archive_sort_urls,
             period_payments=period_payments,
             paid_salary=paid_salary,
             residual_salary=residual_salary,
@@ -2959,6 +3331,8 @@ def create_app(test_config=None):
             payment_labels=PAYMENT_LABELS,
             annual_permit_paid_hours=annual_permit_paid_hours,
             annual_permit_unpaid_hours=annual_permit_unpaid_hours,
+            monthly_total_hours=monthly_total_hours,
+            annual_total_hours=annual_total_hours,
         )
 
     @app.get("/reports/payments-annual.pdf")
@@ -3302,6 +3676,31 @@ def create_app(test_config=None):
             download_name=report.filename,
             mimetype=report.mime_type,
         )
+
+    @app.post("/reports/archive/<int:report_id>/approval")
+    @login_required
+    def set_archived_report_approval(report_id):
+        report = db.get_or_404(GeneratedReport, report_id)
+        action = (request.form.get("action") or "toggle").strip().lower()
+        if action == "auto":
+            report.approval_override = None
+        elif action == "approve":
+            report.approval_override = True
+        elif action == "unapprove":
+            report.approval_override = False
+        else:
+            effective, _ = _report_approval_state(report)
+            report.approval_override = not effective
+        db.session.commit()
+        effective, source = _report_approval_state(report)
+        audit(
+            "report_approval_changed",
+            "generated_report",
+            report.id,
+            f"approved={effective} source={source}",
+        )
+        flash("Stato approvazione report aggiornato", "success")
+        return redirect(request.referrer or url_for("reports"))
 
     @app.post("/reports/archive/<int:report_id>/delete")
     @login_required

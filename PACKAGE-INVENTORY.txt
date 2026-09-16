@@ -1,9 +1,3 @@
-.env.example
-.gitattributes
-.github/workflows/ci.yml
-.github/workflows/codeql.yml
-.github/workflows/release.yml
-.gitignore
 APPLY.md
 CHANGELOG.md
 Dockerfile
@@ -28,6 +22,12 @@ docs/R62-SICKNESS-DAYS-INDICATORS.en.md
 docs/R62-SICKNESS-DAYS-INDICATORS.it.md
 docs/R73-PAYMENTS-EXPENSES-SIGNATURES.en.md
 docs/R73-PAYMENTS-EXPENSES-SIGNATURES.it.md
+env.example
+gitattributes
+github/workflows/ci.yml
+github/workflows/codeql.yml
+github/workflows/release.yml
+gitignore
 kubernetes/README.it.md
 kubernetes/README.md
 kubernetes/application.yaml
@@ -58,6 +58,7 @@ migrations/versions/1008_expense_recovery_allocations.py
 migrations/versions/1009_hour_types_health_permits.py
 migrations/versions/1010_permit_categories_live_in.py
 migrations/versions/1011_sickness_days_and_employer_override.py
+migrations/versions/1012_report_approval_override.py
 output/pdf/colf-manager-manual-v1.0.0-en.pdf
 output/pdf/colf-manager-manual-v1.0.0-it.pdf
 pyproject.toml

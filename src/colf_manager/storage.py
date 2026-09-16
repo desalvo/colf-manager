@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -29,6 +30,62 @@ def safe_unlink(path: Path) -> bool:
         return False
 
 
+def _report_cf_prefix(worker_id):
+    if worker_id is None:
+        return "MULTI-CF"
+    worker = db.session.get(Worker, worker_id)
+    if worker is None:
+        return f"SENZA-CF-{worker_id}"
+    fiscal_code = "".join(ch for ch in (worker.fiscal_code or "").upper() if ch.isalnum())
+    return fiscal_code or f"SENZA-CF-{worker.id}"
+
+
+def prefixed_report_filename(worker_id, filename):
+    prefix = _report_cf_prefix(worker_id)
+    safe_name = Path(filename).name
+    if safe_name.upper().startswith(prefix.upper() + "_"):
+        return safe_name
+    # Replace a previous fallback/CF prefix rather than stacking prefixes when
+    # the worker fiscal code is populated or corrected later.
+    if re.match(r"^SENZA-CF-\d+_", safe_name, flags=re.IGNORECASE):
+        safe_name = safe_name.split("_", 1)[1]
+    elif worker_id is not None and re.match(r"^[A-Z0-9]{16}_", safe_name, flags=re.IGNORECASE):
+        safe_name = safe_name.split("_", 1)[1]
+    elif worker_id is None and safe_name.upper().startswith("MULTI-CF_"):
+        safe_name = safe_name.split("_", 1)[1]
+    return f"{prefix}_{safe_name}"
+
+
+def normalize_archived_report_filenames(app):
+    """Prefix archived report filenames with worker fiscal codes and migrate files in place."""
+    report_dir = Path(app.config["REPORT_FOLDER"])
+    report_dir.mkdir(parents=True, exist_ok=True)
+    changed = 0
+    for report in GeneratedReport.query.order_by(GeneratedReport.id).all():
+        wanted_filename = prefixed_report_filename(report.worker_id, report.filename)
+        if wanted_filename == report.filename:
+            continue
+        old_path = report_dir / report.stored_name
+        # Preserve the storage uniqueness prefix while replacing only the user-facing suffix.
+        marker = report.filename
+        if report.stored_name.endswith(marker):
+            new_stored = report.stored_name[: -len(marker)] + wanted_filename
+        else:
+            new_stored = f"migrated-{report.id}-{wanted_filename}"
+        target = report_dir / new_stored
+        if old_path.exists() and old_path != target:
+            if target.exists():
+                target = report_dir / f"migrated-{report.id}-{wanted_filename}"
+                new_stored = target.name
+            old_path.replace(target)
+        report.filename = wanted_filename
+        report.stored_name = new_stored
+        changed += 1
+    if changed:
+        db.session.commit()
+    return changed
+
+
 def store_report(
     app,
     worker_id,
@@ -40,6 +97,7 @@ def store_report(
 ):
     report_dir = Path(app.config["REPORT_FOLDER"])
     report_dir.mkdir(parents=True, exist_ok=True)
+    filename = prefixed_report_filename(worker_id, filename)
     digest = hashlib.sha256(payload).hexdigest()
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     stored_name = f"{timestamp}-{digest[:16]}-{filename}"

@@ -1726,3 +1726,216 @@ def test_vacation_exactly_three_days_in_start_month_is_deferred(app):
         assert july["vacation_pay_deferred"] == Decimal("839.94")
         assert august["vacation_pay"] == Decimal("839.94")
         assert august["vacation_pay_carry_in"] == Decimal("839.94")
+
+
+def test_marking_payment_paid_replaces_existing_monthly_payroll(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 9, 1), amount=Decimal("10.00")))
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 9, 7),
+                start_time=time(9),
+                end_time=time(11),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
+        db.session.commit()
+
+    login(client)
+    generated = client.get(f"/reports/payroll.pdf?worker_id={worker_id}&year=2026&month=9")
+    assert generated.status_code == 200
+
+    with app.app_context():
+        report = GeneratedReport.query.filter_by(worker_id=worker_id, report_type="monthly_payroll").one()
+        payment = Payment.query.filter_by(
+            worker_id=worker_id,
+            payment_type="salary",
+            period_start=date(2026, 9, 1),
+            period_end=date(2026, 9, 30),
+        ).one()
+        assert payment.status == "pending"
+        assert payment.source_report_id == report.id
+        report_id = report.id
+        old_hash = report.sha256
+        old_stored = report.stored_name
+        payment_id = payment.id
+        amount = str(payment.amount)
+        old_path = Path(app.config["REPORT_FOLDER"]) / old_stored
+        assert old_path.exists()
+
+    response = client.post(
+        f"/payments/{payment_id}/edit",
+        data={
+            "worker_id": str(worker_id),
+            "payment_type": "salary",
+            "amount": amount,
+            "status": "paid",
+            "payment_date": "2026-09-30",
+            "period_start": "2026-09-01",
+            "period_end": "2026-09-30",
+            "description": "Retribuzione settembre",
+            "notes": "",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+
+    with app.app_context():
+        assert GeneratedReport.query.filter_by(worker_id=worker_id, report_type="monthly_payroll").count() == 1
+        refreshed = db.session.get(GeneratedReport, report_id)
+        updated_payment = db.session.get(Payment, payment_id)
+        assert refreshed is not None
+        assert refreshed.sha256 != old_hash
+        assert refreshed.stored_name != old_stored
+        assert updated_payment.status == "paid"
+        assert updated_payment.source_report_id == report_id
+        assert not (Path(app.config["REPORT_FOLDER"]) / old_stored).exists()
+        assert (Path(app.config["REPORT_FOLDER"]) / refreshed.stored_name).exists()
+
+
+def test_deleting_paid_payment_replaces_existing_monthly_payroll(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 10, 1), amount=Decimal("10.00")))
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 10, 5),
+                start_time=time(9),
+                end_time=time(11),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
+        db.session.commit()
+
+    login(client)
+    assert client.get(f"/reports/payroll.pdf?worker_id={worker_id}&year=2026&month=10").status_code == 200
+    with app.app_context():
+        report = GeneratedReport.query.filter_by(worker_id=worker_id, report_type="monthly_payroll").one()
+        payment = Payment.query.filter_by(worker_id=worker_id, payment_type="salary").one()
+        payment.status = "paid"
+        payment.payment_date = date(2026, 10, 31)
+        db.session.commit()
+        report_id = report.id
+        payment_id = payment.id
+
+    # First force the archived payroll to reflect the paid status through the edit path.
+    with app.app_context():
+        payment = db.session.get(Payment, payment_id)
+        amount = str(payment.amount)
+    assert client.post(
+        f"/payments/{payment_id}/edit",
+        data={
+            "worker_id": str(worker_id),
+            "payment_type": "salary",
+            "amount": amount,
+            "status": "paid",
+            "payment_date": "2026-10-31",
+            "period_start": "2026-10-01",
+            "period_end": "2026-10-31",
+            "description": "Retribuzione ottobre",
+            "notes": "",
+        },
+    ).status_code == 302
+
+    with app.app_context():
+        before_delete = db.session.get(GeneratedReport, report_id)
+        paid_hash = before_delete.sha256
+
+    assert client.post(f"/payments/{payment_id}/delete", follow_redirects=False).status_code == 302
+
+    with app.app_context():
+        refreshed = db.session.get(GeneratedReport, report_id)
+        assert refreshed is not None
+        assert refreshed.sha256 != paid_hash
+        assert db.session.get(Payment, payment_id) is None
+        assert GeneratedReport.query.filter_by(worker_id=worker_id, report_type="monthly_payroll").count() == 1
+
+
+def test_reports_archive_search_paginates_all_rows_and_uses_descriptions(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.fiscal_code = "RSSMRA80A01H501U"
+        folder = Path(app.config["REPORT_FOLDER"])
+        folder.mkdir(parents=True, exist_ok=True)
+        for idx in range(12):
+            filename = f"RSSMRA80A01H501U_report-{idx:02d}.pdf"
+            stored = f"stored-{idx:02d}-{filename}"
+            (folder / stored).write_bytes(b"%PDF-1.4\n%%EOF")
+            db.session.add(
+                GeneratedReport(
+                    worker_id=worker_id,
+                    report_type="monthly_payroll" if idx == 11 else "trend",
+                    filename=filename,
+                    stored_name=stored,
+                    sha256=f"{idx:064x}"[-64:],
+                    size_bytes=14,
+                    period_start=date(2026, 1, 1),
+                    period_end=date(2026, 1, 31),
+                )
+            )
+        db.session.commit()
+    login(client)
+    page = client.get(f"/reports?worker_id={worker_id}&year=2026&month=1")
+    assert page.status_code == 200
+    assert page.data.count(b"/reports/archive/") >= 10
+    assert b"massimo 10 per pagina" in page.data
+    found = client.get(
+        f"/reports?worker_id={worker_id}&year=2026&month=1&archive_q=report-11"
+    )
+    assert found.status_code == 200
+    assert b"report-11.pdf" in found.data
+    assert b"Cedolino mensile" in found.data
+
+
+def test_report_manual_approval_override(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        report = GeneratedReport(
+            worker_id=worker_id,
+            report_type="trend",
+            filename="SENZA-CF-test.pdf",
+            stored_name="approval-test.pdf",
+            sha256="a" * 64,
+            size_bytes=10,
+        )
+        Path(app.config["REPORT_FOLDER"], report.stored_name).write_bytes(b"%PDF-1.4")
+        db.session.add(report)
+        db.session.commit()
+        report_id = report.id
+    login(client)
+    assert client.post(
+        f"/reports/archive/{report_id}/approval", data={"action": "approve"}
+    ).status_code == 302
+    with app.app_context():
+        assert db.session.get(GeneratedReport, report_id).approval_override is True
+    assert client.post(
+        f"/reports/archive/{report_id}/approval", data={"action": "unapprove"}
+    ).status_code == 302
+    with app.app_context():
+        assert db.session.get(GeneratedReport, report_id).approval_override is False
+    assert client.post(
+        f"/reports/archive/{report_id}/approval", data={"action": "auto"}
+    ).status_code == 302
+    with app.app_context():
+        assert db.session.get(GeneratedReport, report_id).approval_override is None
+
+
+def test_reports_total_hours_include_paid_and_unpaid_permits(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=10))
+        db.session.add(WorkEntry(worker_id=worker_id, work_date=date(2026, 1, 5), start_time=time(9), end_time=time(11), break_minutes=0, location="Casa"))
+        db.session.add(Absence(worker_id=worker_id, kind="permit", start_date=date(2026, 1, 6), end_date=date(2026, 1, 6), start_time=time(9), end_time=time(10), paid=True, permit_category="medical"))
+        db.session.add(Absence(worker_id=worker_id, kind="permit", start_date=date(2026, 1, 7), end_date=date(2026, 1, 7), start_time=time(9), end_time=time(10, 30), paid=False, permit_category="other"))
+        db.session.commit()
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=1")
+    assert response.status_code == 200
+    assert b'data-metric="monthly-total-hours">4.50 h' in response.data
+    assert b'data-metric="annual-total-hours">4.50 h' in response.data

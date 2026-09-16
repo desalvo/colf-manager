@@ -235,6 +235,7 @@ class GeneratedReport(db.Model):
     period_start = db.Column(db.Date)
     period_end = db.Column(db.Date)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False, index=True)
+    approval_override = db.Column(db.Boolean, nullable=True)
 
 
 class Payment(db.Model):

@@ -1,5 +1,39 @@
 # Changelog
 
+## r91-full - final Ruff formatter cleanup
+
+- Formatted `src/colf_manager/storage.py` exactly as required by the Ruff formatter.
+- No functional changes from r89.
+
+## r89-full - formatter production gate
+
+- Allineata `src/colf_manager/storage.py` alla formattazione richiesta da Ruff.
+- Nessuna modifica funzionale rispetto a r88; preservati i 85 test applicativi verdi.
+
+## r88-full - ore totali permessi e formattazione gate
+
+- Corretto il riferimento mensile dei permessi in Report e paghe: `Ore totali` usa ora i permessi del mese selezionato, non del mese corrente.
+- Mantenuti separati i valori annuali dei permessi e i valori del mese filtrato.
+- Allineati a Ruff format la migrazione 1012 e `storage.py`.
+
+
+## r87-full - archivio report ricercabile, CF e approvazione
+- Archivio report: ricerca globale, ordinamento sulle colonne dati e paginazione server-side a 10 elementi.
+- Tipi report mostrati con descrizioni leggibili/localizzate invece degli acronimi tecnici.
+- Nomi file archiviati prefissati con il codice fiscale del lavoratore; migrazione automatica dei report esistenti.
+- Stato Approvato automatico per cedolini mensili completi e interamente pagati, con override manuale approva/non approva e ripristino automatico.
+- In Report e paghe, Ore totali include anche i permessi retribuiti e non retribuiti.
+
+
+## r86-full - refresh archived payroll when payments change
+
+- When a payment is created/updated for a month with an archived monthly payroll, regenerate that payroll with the current paid/pending amounts.
+- Replaces the archived PDF in place while preserving the GeneratedReport id and payment source-report relationship.
+- Paid -> pending, amount/period edits and payment deletion refresh affected archived payrolls too.
+- Removes the obsolete archived PDF only after the database commit succeeds.
+- Adds regression coverage for marking a generated salary payment as paid and for deleting a paid payment.
+
+
 ## r85-full - vacation attribution threshold, due highlights and payment receipts
 
 - Defer a multi-month continuous vacation period to its ending month only when the starting month contains at most 3 contractual vacation days.

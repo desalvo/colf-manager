@@ -77,6 +77,7 @@ from .permit_rules import (
     PERMIT_CATEGORIES,
     permit_metrics,
     validate_paid_permit,
+    canonical_permit_category,
 )
 from .reporting import (
     annual_payroll_pdf,
@@ -1594,7 +1595,9 @@ def create_app(test_config=None):
             paid = True
         permit_category = None
         if kind == "permit":
-            permit_category = str(payload.get("permit_category", getattr(existing, "permit_category", None) or ("medical" if paid else "other")))
+            permit_category = canonical_permit_category(
+                str(payload.get("permit_category", getattr(existing, "permit_category", None) or ("medical" if paid else "other")))
+            )
             if permit_category not in PERMIT_CATEGORIES:
                 raise ValueError("Categoria permesso non valida")
             if paid and permit_category == "other":
@@ -1888,14 +1891,66 @@ def create_app(test_config=None):
             except (ValueError, KeyError, TypeError) as exc:
                 db.session.rollback()
                 flash(str(exc), "error")
-        expense_rows = [
+        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
+        worker_map = {worker.id: worker for worker in workers}
+        all_expenses = [
             _decorate_expense(item)
             for item in Expense.query.order_by(Expense.expense_date.desc(), Expense.id.desc()).all()
         ]
+
+        search = (request.args.get("q") or "").strip()
+        filtered_expenses = all_expenses
+        if search:
+            needle = search.casefold()
+
+            def matches(expense):
+                worker = worker_map.get(expense.worker_id)
+                worker_name = (
+                    f"{worker.first_name} {worker.last_name}" if worker else ""
+                )
+                direction_label = (
+                    "Lavoratore da rimborsare"
+                    if expense.direction == "worker_advance"
+                    else "Datore da recuperare"
+                )
+                searchable = " ".join(
+                    [
+                        str(expense.id),
+                        expense.description or "",
+                        expense.expense_date.isoformat(),
+                        expense.expense_date.strftime("%d/%m/%Y"),
+                        worker_name,
+                        direction_label,
+                        expense.direction or "",
+                        f"{Decimal(expense.amount):.2f}",
+                        f"{Decimal(expense.manual_settled):.2f}",
+                        f"{Decimal(expense.payroll_allocated):.2f}",
+                        f"{Decimal(expense.planned_recovery):.2f}",
+                        f"{Decimal(expense.residual_amount):.2f}",
+                        expense.balance_status or "",
+                    ]
+                ).casefold()
+                return needle in searchable
+
+            filtered_expenses = [item for item in all_expenses if matches(item)]
+
+        per_page = 10
+        total_filtered = len(filtered_expenses)
+        total_pages = max(1, (total_filtered + per_page - 1) // per_page)
+        page = max(1, request.args.get("page", 1, type=int) or 1)
+        page = min(page, total_pages)
+        start = (page - 1) * per_page
+        expense_rows = filtered_expenses[start : start + per_page]
+
         return render_template(
             "expenses.html",
-            workers=Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+            workers=workers,
             expenses=expense_rows,
+            expense_total=len(all_expenses),
+            expense_filtered_total=total_filtered,
+            expense_search=search,
+            expense_page=page,
+            expense_pages=total_pages,
         )
 
     @app.get("/expenses/<int:expense_id>")
@@ -2785,6 +2840,14 @@ def create_app(test_config=None):
         annual_paid_payments = _paid_payments_in_year(year, worker_id) if worker_id else []
         annual_payment_totals = _payment_totals(annual_paid_payments)
         global_annual_payment_totals = _payment_totals(_paid_payments_in_year(year))
+        annual_permit_paid_hours = sum(
+            (Decimal(str(item.get("paid_year") or 0)) for item in permit_overview),
+            Decimal("0"),
+        )
+        annual_permit_unpaid_hours = sum(
+            (Decimal(str(item.get("unpaid_year") or 0)) for item in permit_overview),
+            Decimal("0"),
+        )
         return render_template(
             "reports.html",
             workers=workers,
@@ -2806,6 +2869,8 @@ def create_app(test_config=None):
             annual_payment_totals=annual_payment_totals,
             global_annual_payment_totals=global_annual_payment_totals,
             payment_labels=PAYMENT_LABELS,
+            annual_permit_paid_hours=annual_permit_paid_hours,
+            annual_permit_unpaid_hours=annual_permit_unpaid_hours,
         )
 
     @app.get("/reports/payments-annual.pdf")

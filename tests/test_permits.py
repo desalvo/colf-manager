@@ -65,3 +65,33 @@ def test_other_is_available_for_unpaid_tracking():
     other = next(x for x in metrics if x["category"] == "other")
     assert other["unpaid_year"] == Decimal("3")
     assert other["annual_total"] is None
+
+
+def test_legacy_medical_visit_alias_is_aggregated():
+    from datetime import date, time
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from colf_manager.permit_rules import permit_metrics
+
+    worker = SimpleNamespace(
+        weekly_hours=Decimal("40"),
+        live_in=False,
+        live_in_reduced_schedule=False,
+        union_officer=False,
+        employment_start=date(2025, 1, 1),
+    )
+    absence = SimpleNamespace(
+        kind="permit",
+        start_date=date(2026, 3, 2),
+        end_date=date(2026, 3, 2),
+        start_time=time(9),
+        end_time=time(11),
+        paid=True,
+        permit_category="medical_visit",
+        paid_beyond_legal_limit=False,
+    )
+    rows = permit_metrics(worker, [absence], 2026, date(2026, 9, 16))
+    medical = next(row for row in rows if row["category"] == "medical")
+    assert medical["paid_year"] == Decimal("2")
+    assert medical["metric_category"] == "medical_visit"

@@ -34,6 +34,13 @@ function addMinutes(date, minutes) {
   return new Date(date.getTime() + Number(minutes) * 60000);
 }
 
+
+function setVisible(element, visible) {
+  if (!element) return;
+  element.hidden = !visible;
+  element.classList.toggle('hidden', !visible);
+}
+
 function syncEntryKind() {
   const kind = entryKind.value;
   const isWork = ['ordinary', 'overtime'].includes(kind);
@@ -42,21 +49,21 @@ function syncEntryKind() {
   const isVacation = kind === 'vacation';
   const usesTime = isWork || isPermit;
 
-  workOnlyFields.classList.toggle('hidden', !isWork);
-  permitOnlyFields.classList.toggle('hidden', !isPermit);
-  sicknessOnlyFields.classList.toggle('hidden', !isSickness);
-  vacationOnlyFields.classList.toggle('hidden', !isVacation);
-  endDateField.classList.toggle('hidden', isWork);
-  timeFields.classList.toggle('hidden', !usesTime);
-  overtimeRateField.classList.toggle('hidden', kind !== 'overtime');
+  setVisible(workOnlyFields, isWork);
+  setVisible(permitOnlyFields, isPermit);
+  setVisible(sicknessOnlyFields, isSickness);
+  setVisible(vacationOnlyFields, isVacation);
+  setVisible(endDateField, !isWork);
+  setVisible(timeFields, usesTime);
+  setVisible(overtimeRateField, kind === 'overtime');
 
   workForm.querySelector('[name=location_id]').required = isWork;
   workForm.querySelector('[name=end_date]').required = !isWork;
   workForm.querySelector('[name=start_time]').required = usesTime;
   workForm.querySelector('[name=end_time]').required = usesTime;
   paidEntry.disabled = false;
-  document.getElementById('paidEntryField').classList.toggle('hidden', isVacation);
-  favorableTreatmentField.classList.toggle('hidden', !(isPermit || isSickness));
+  setVisible(document.getElementById('paidEntryField'), !isVacation);
+  setVisible(favorableTreatmentField, isPermit || isSickness);
 
   if (!isWork) {
     const firstDate = workForm.querySelector('[name=work_date]').value;

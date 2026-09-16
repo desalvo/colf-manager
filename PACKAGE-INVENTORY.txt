@@ -150,3 +150,4 @@ tests/test_payments.py
 tests/test_permits.py
 tests/test_sickness.py
 tests/test_validation.py
+PACKAGE-INVENTORY.txt

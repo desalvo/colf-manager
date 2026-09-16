@@ -1,4 +1,70 @@
 {% extends 'base.html' %}{% block content %}
 <div class="page-title"><span class="eyebrow">Partite e compensazioni</span><h1>Spese e rimborsi</h1><p>Registra le spese sostenute da una delle parti. Le compensazioni manuali, anche in contanti e senza documento, riducono il residuo che confluisce nel cedolino.</p></div>
-<div class="grid2"><section class="card"><h2>Registra spesa</h2><form method="post" class="formgrid"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Lavoratore<select name="worker_id">{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label><label>Data<input type="date" name="expense_date" required></label><label class="span2">Descrizione<input name="description" required></label><label>Importo (€)<input type="number" min="0" step=".01" name="amount" required></label><label>Direzione<select name="direction"><option value="employer_advance">Sostenuta dal datore (da recuperare)</option><option value="worker_advance">Sostenuta dal lavoratore (da rimborsare)</option></select></label><button>Salva spesa</button></form></section>
-<section class="card"><div class="card-title"><h2>Storico spese</h2><span>{{expenses|length}} movimenti</span></div><div class="entity-list">{% for e in expenses %}{% set w=workers|selectattr('id','equalto',e.worker_id)|first %}<article class="entity-row"><div class="entity-main"><div class="entity-icon">↔</div><div><b>{{e.description}}</b><small>{{e.expense_date}} · {{w.first_name if w else ''}} {{w.last_name if w else ''}} · {{'Lavoratore da rimborsare' if e.direction == 'worker_advance' else 'Datore da recuperare'}}</small><small>Originaria € {{'%.2f'|format(e.amount)}} · manuale € {{'%.2f'|format(e.manual_settled)}} · cedolino € {{'%.2f'|format(e.payroll_allocated)}} · pianificato € {{'%.2f'|format(e.planned_recovery)}} · <b>residuo € {{'%.2f'|format(e.residual_amount)}}</b> · {{e.balance_status}}</small></div></div><div class="row-actions"><a class="button secondary" href="/expenses/{{e.id}}">Compensazioni</a><a class="icon-action" href="/expenses/{{e.id}}/edit" title="Modifica" aria-label="Modifica spesa">✎</a><form method="post" action="/expenses/{{e.id}}/delete" onsubmit="return confirm('Eliminare questa spesa e tutte le compensazioni collegate?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="icon-action danger-outline" title="Elimina" aria-label="Elimina spesa">🗑</button></form></div></article>{% else %}<p>Nessuna spesa registrata.</p>{% endfor %}</div></section></div>{% endblock %}
+<div class="grid2">
+  <section class="card">
+    <h2>Registra spesa</h2>
+    <form method="post" class="formgrid">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Lavoratore<select name="worker_id">{% for w in workers %}<option value="{{w.id}}">{{w.first_name}} {{w.last_name}}</option>{% endfor %}</select></label>
+      <label>Data<input type="date" name="expense_date" required></label>
+      <label class="span2">Descrizione<input name="description" required></label>
+      <label>Importo (€)<input type="number" min="0" step=".01" name="amount" required></label>
+      <label>Direzione<select name="direction"><option value="employer_advance">Sostenuta dal datore (da recuperare)</option><option value="worker_advance">Sostenuta dal lavoratore (da rimborsare)</option></select></label>
+      <button>Salva spesa</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-title">
+      <div><h2>Storico spese</h2><small>{{expense_filtered_total}} risultati su {{expense_total}} movimenti</small></div>
+      <span>max 10 per pagina</span>
+    </div>
+
+    <form method="get" class="expense-history-search" role="search">
+      <label class="span2">Cerca in tutto lo storico
+        <input type="search" name="q" value="{{expense_search}}" placeholder="Descrizione, lavoratore, data, importo, stato…">
+      </label>
+      <button>Cerca</button>
+      {% if expense_search %}<a class="button secondary" href="/expenses">Azzera</a>{% endif %}
+    </form>
+
+    <div class="expense-history-list">
+      {% for e in expenses %}
+        {% set w=workers|selectattr('id','equalto',e.worker_id)|first %}
+        <details class="expense-history-item collapsible-card">
+          <summary>
+            <span class="expense-history-summary-main">
+              <b>{{e.description}}</b>
+              <small>{{e.expense_date.strftime('%d/%m/%Y')}} · {{w.first_name if w else ''}} {{w.last_name if w else ''}}</small>
+            </span>
+            <span class="expense-history-summary-amount">€ {{'%.2f'|format(e.amount)}}</span>
+            <span class="summary-chevron" aria-hidden="true">⌄</span>
+          </summary>
+          <div class="collapsible-content expense-history-content">
+            <p><b>Direzione:</b> {{'Lavoratore da rimborsare' if e.direction == 'worker_advance' else 'Datore da recuperare'}}</p>
+            <p>Originaria € {{'%.2f'|format(e.amount)}} · manuale € {{'%.2f'|format(e.manual_settled)}} · cedolino € {{'%.2f'|format(e.payroll_allocated)}} · pianificato € {{'%.2f'|format(e.planned_recovery)}} · <b>residuo € {{'%.2f'|format(e.residual_amount)}}</b> · {{e.balance_status}}</p>
+            <div class="row-actions">
+              <a class="button secondary" href="/expenses/{{e.id}}">Compensazioni</a>
+              <a class="icon-action" href="/expenses/{{e.id}}/edit" title="Modifica" aria-label="Modifica spesa">✎</a>
+              <form method="post" action="/expenses/{{e.id}}/delete" onsubmit="return confirm('Eliminare questa spesa e tutte le compensazioni collegate?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="icon-action danger-outline" title="Elimina" aria-label="Elimina spesa">🗑</button>
+              </form>
+            </div>
+          </div>
+        </details>
+      {% else %}
+        <p>{% if expense_search %}Nessun movimento corrisponde alla ricerca.{% else %}Nessuna spesa registrata.{% endif %}</p>
+      {% endfor %}
+    </div>
+
+    {% if expense_pages > 1 %}
+      <nav class="pagination" aria-label="Paginazione storico spese">
+        {% if expense_page > 1 %}<a class="button secondary" href="/expenses?page={{expense_page-1}}{% if expense_search %}&q={{expense_search|urlencode}}{% endif %}">← Precedente</a>{% endif %}
+        <span>Pagina {{expense_page}} di {{expense_pages}}</span>
+        {% if expense_page < expense_pages %}<a class="button secondary" href="/expenses?page={{expense_page+1}}{% if expense_search %}&q={{expense_search|urlencode}}{% endif %}">Successiva →</a>{% endif %}
+      </nav>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

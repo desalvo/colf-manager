@@ -24,6 +24,15 @@ PERSONAL_POOL = {
     "disability_family_care",
 }
 
+PERMIT_CATEGORY_ALIASES = {
+    "medical_visit": "medical",
+}
+
+
+def canonical_permit_category(value: str | None) -> str:
+    category = (value or "other").strip()
+    return PERMIT_CATEGORY_ALIASES.get(category, category)
+
 
 def _d(value) -> Decimal:
     return Decimal(str(value or 0))
@@ -191,7 +200,7 @@ def permit_metrics(worker, absences, year: int, as_of: date | None = None) -> li
             absence_hours(a)
             for a in all_permits
             if getattr(a, "paid", False)
-            and getattr(a, "permit_category", None) in PERSONAL_POOL
+            and canonical_permit_category(getattr(a, "permit_category", None)) in PERSONAL_POOL
             and a.start_date <= cutoff
         ),
         Decimal("0"),
@@ -202,7 +211,7 @@ def permit_metrics(worker, absences, year: int, as_of: date | None = None) -> li
         category_abs = [
             a
             for a in all_permits
-            if (getattr(a, "permit_category", None) or "other") == category
+            if canonical_permit_category(getattr(a, "permit_category", None)) == category
         ]
         paid_month = sum(
             (
@@ -276,6 +285,7 @@ def permit_metrics(worker, absences, year: int, as_of: date | None = None) -> li
             {
                 **rule,
                 "category": category,
+                "metric_category": "medical_visit" if category == "medical" else category,
                 "paid_month": paid_month,
                 "paid_year": paid_year,
                 "unpaid_month": unpaid_month,
@@ -292,7 +302,7 @@ def permit_metrics(worker, absences, year: int, as_of: date | None = None) -> li
 def validate_paid_permit(worker, absences, candidate, replacing=None):
     if candidate.kind != "permit":
         return
-    category = getattr(candidate, "permit_category", None) or "other"
+    category = canonical_permit_category(getattr(candidate, "permit_category", None))
     if candidate.paid and category == "other":
         raise ValueError("La categoria 'Altro' è disponibile solo per permessi non retribuiti")
     if category not in PERMIT_CATEGORIES:
@@ -323,7 +333,7 @@ def validate_paid_permit(worker, absences, candidate, replacing=None):
                 absence_hours(a)
                 for a in current
                 if a.paid
-                and getattr(a, "permit_category", None) in PERSONAL_POOL
+                and canonical_permit_category(getattr(a, "permit_category", None)) in PERSONAL_POOL
                 and a.start_date.year == candidate.start_date.year
             ),
             Decimal("0"),
@@ -343,7 +353,7 @@ def validate_paid_permit(worker, absences, candidate, replacing=None):
                 absence_hours(a)
                 for a in current
                 if a.paid
-                and getattr(a, "permit_category", None) == category
+                and canonical_permit_category(getattr(a, "permit_category", None)) == category
                 and a.start_date.year == candidate.start_date.year
             ),
             Decimal("0"),
@@ -361,7 +371,7 @@ def validate_paid_permit(worker, absences, candidate, replacing=None):
                 absence_hours(a)
                 for a in current
                 if a.paid
-                and getattr(a, "permit_category", None) == category
+                and canonical_permit_category(getattr(a, "permit_category", None)) == category
                 and a.start_date.year == candidate.start_date.year
             ),
             Decimal("0"),

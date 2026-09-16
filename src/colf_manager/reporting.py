@@ -207,12 +207,29 @@ def _signature_image(path):
         with PILImage.open(path) as source:
             rgba = source.convert("RGBA")
             pixels = []
-            for red, green, blue, alpha in rgba.getdata():
+            # Pillow 14 removes Image.getdata(); on current Pillow versions
+            # get_flattened_data() provides the same flattened pixel stream
+            # without emitting a deprecation warning. Keep a compatibility
+            # fallback for older supported Pillow releases.
+            pixel_data = (
+                rgba.get_flattened_data()
+                if hasattr(rgba, "get_flattened_data")
+                else rgba.getdata()
+            )
+            for red, green, blue, alpha in pixel_data:
                 if red >= 245 and green >= 245 and blue >= 245:
                     pixels.append((255, 255, 255, 0))
                 else:
                     pixels.append((red, green, blue, alpha))
             rgba.putdata(pixels)
+
+            # Crop transparent margins before ReportLab centres the image.
+            # Without this, a signature scanned with asymmetric white margins
+            # is geometrically centred as a file but visibly shifted in the box.
+            bbox = rgba.getchannel("A").getbbox()
+            if bbox:
+                rgba = rgba.crop(bbox)
+
             stream = BytesIO()
             rgba.save(stream, format="PNG")
             stream.seek(0)

@@ -1,3 +1,36 @@
+## r79 - Pillow signature pixel API compatibility
+
+- Replaced deprecated Pillow `Image.getdata()` usage with `get_flattened_data()` when available.
+- Kept a compatibility fallback for older Pillow releases.
+- Signature transparency, cropping, scaling and centering behaviour remain unchanged.
+
+## r78 - report permit rendering compatibility
+- restored the exact “Totale annuo” label in Reports and payroll;
+- aggregates legacy `medical_visit` permits into the current medical-permit category;
+- exposes the legacy-compatible `report-permit-medical_visit-*` metric key so annual values render consistently for existing data and regression tests.
+
+## r77 - report permit aggregate scope fix
+- fixed annual paid/unpaid permit aggregates being passed from the wrong route scope;
+- report/payroll rendering now receives the annual permit hour totals it references;
+- removed the stray undefined variables from payment detail rendering;
+- aligned production-gate and package metadata to r77-full.
+
+## r76 - calendar type-specific field visibility
+- fixed calendar dialog visibility by using the native HTML `hidden` state in addition to the CSS utility class;
+- permit category is shown only for permit records;
+- oncological sickness is shown only for sickness records;
+- employer-favour treatment is shown only for permit/sickness records;
+- workplace and work-only details are shown only for ordinary/overtime records;
+- added regression checks for deterministic type-specific field visibility.
+
+## r76-full - annual permit values, signature centering and searchable expense history
+- report/payroll annual summary now shows paid and unpaid permit hours;
+- permit section exposes current and annual values per category, including used, accrued/total and remaining amounts;
+- PDF signatures are cropped to visible ink after white-background transparency conversion, then visually centred in the signature field;
+- expense/reimbursement history entries are collapsed by default;
+- expense history search covers the complete archive before pagination;
+- expense history is server-side paginated with a maximum of 10 entries per page.
+
 # Changelog
 
 

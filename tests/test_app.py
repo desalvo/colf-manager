@@ -25,7 +25,7 @@ from colf_manager.models import (
     Worker,
     db,
 )
-from colf_manager.reporting import payroll_pdf
+from colf_manager.reporting import _signature_image, payroll_pdf
 
 
 @pytest.fixture()
@@ -693,6 +693,10 @@ def test_calendar_dialog_has_one_paid_choice_and_type_specific_sections(app, cli
     assert dialog.count("Trattamento di miglior favore") == 1
     assert 'name="sickness_paid_beyond_legal_limit"' not in dialog
     assert 'name="paid_hours"' not in dialog
+    assert 'id="permitOnlyFields" class="hidden" hidden' in dialog
+    assert 'id="sicknessOnlyFields" class="hidden" hidden' in dialog
+    assert 'id="vacationOnlyFields" class="hidden" hidden' in dialog
+    assert 'id="favorableTreatmentField" hidden' in dialog
 
     javascript = (Path(__file__).parents[1] / "src/colf_manager/static/calendar.js").read_text()
     assert "paidEntry.checked = props.paid !== false" in javascript
@@ -700,6 +704,14 @@ def test_calendar_dialog_has_one_paid_choice_and_type_specific_sections(app, cli
     assert "paidEntry.checked = Boolean(data.paid)" in javascript
     sync_body = javascript.split("function syncEntryKind() {", 1)[1].split("function resetWorkForm()", 1)[0]
     assert "paidEntry.checked = true" not in sync_body
+    assert "setVisible(workOnlyFields, isWork)" in sync_body
+    assert "setVisible(permitOnlyFields, isPermit)" in sync_body
+    assert "setVisible(sicknessOnlyFields, isSickness)" in sync_body
+    assert "setVisible(favorableTreatmentField, isPermit || isSickness)" in sync_body
+    assert "setVisible(overtimeRateField, kind === 'overtime')" in sync_body
+    assert "setVisible(document.getElementById('paidEntryField'), !isVacation)" in sync_body
+    css = (Path(__file__).parents[1] / "src/colf_manager/static/style.css").read_text()
+    assert ".hidden{display:none!important}" in css
 
 
 def test_permit_hours_are_always_derived_from_start_and_end(app, client):
@@ -1312,3 +1324,116 @@ def test_mail_compose_default_body_uses_real_newlines(app, client):
     assert response.status_code == 200
     assert b"Buongiorno,\n\nin allegato/in questa comunicazione trova il documento richiesto.\n\nCordiali saluti." in response.data
     assert b"Buongiorno,\\n\\nin allegato/in questa comunicazione" not in response.data
+
+
+def test_expense_history_is_collapsed_paginated_and_searches_all_records(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = Decimal("40")
+        for index in range(12):
+            db.session.add(
+                Expense(
+                    worker_id=worker_id,
+                    expense_date=date(2026, 1, min(index + 1, 28)),
+                    description=("Needle expense" if index == 0 else f"Expense {index:02d}"),
+                    amount=Decimal("10.00") + index,
+                    direction="worker_advance",
+                    reimbursed=False,
+                )
+            )
+        db.session.commit()
+
+    login(client)
+    first_page = client.get("/expenses")
+    assert first_page.status_code == 200
+    assert first_page.data.count(b'class="expense-history-item collapsible-card"') == 10
+    assert b"Pagina 1 di 2" in first_page.data
+    assert b"Needle expense" not in first_page.data
+
+    second_page = client.get("/expenses?page=2")
+    assert second_page.data.count(b'class="expense-history-item collapsible-card"') == 2
+    assert b"Needle expense" in second_page.data
+
+    search = client.get("/expenses?q=Needle")
+    assert search.status_code == 200
+    assert b"Needle expense" in search.data
+    assert b"1 risultati su 12 movimenti" in search.data
+    assert search.data.count(b'class="expense-history-item collapsible-card"') == 1
+
+
+def test_payment_detail_does_not_depend_on_report_permit_aggregates(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        payment = Payment(
+            worker_id=worker_id,
+            payment_type="salary",
+            amount=Decimal("10.00"),
+            status="paid",
+            payment_date=date(2026, 9, 15),
+        )
+        db.session.add(payment)
+        db.session.commit()
+        payment_id = payment.id
+
+    login(client)
+    response = client.get(f"/payments/{payment_id}")
+    assert response.status_code == 200
+
+
+def test_reports_show_annual_paid_and_unpaid_permit_hours_and_category_values(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = Decimal("40")
+        db.session.add_all(
+            [
+                Absence(
+                    worker_id=worker_id,
+                    start_date=date(2026, 3, 2),
+                    end_date=date(2026, 3, 2),
+                    start_time=time(9),
+                    end_time=time(11),
+                    kind="permit",
+                    permit_category="medical_visit",
+                    paid=True,
+                    paid_hours=Decimal("2"),
+                ),
+                Absence(
+                    worker_id=worker_id,
+                    start_date=date(2026, 3, 3),
+                    end_date=date(2026, 3, 3),
+                    start_time=time(9),
+                    end_time=time(10),
+                    kind="permit",
+                    permit_category="other",
+                    paid=False,
+                    paid_hours=Decimal("1"),
+                ),
+            ]
+        )
+        db.session.commit()
+
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=3")
+    assert response.status_code == 200
+    assert b"Ore permesso retribuite" in response.data
+    assert b"Ore permesso non retribuite" in response.data
+    assert b'data-metric="report-permit-medical_visit-paid-year">2.00 h' in response.data
+    assert b'data-metric="report-permit-other-unpaid-year">1.00 h' in response.data
+    assert b"Residuo annuale" in response.data
+
+
+def test_signature_image_crops_transparent_margins_before_centering(tmp_path):
+    from PIL import Image, ImageDraw
+
+    path = tmp_path / "signature.png"
+    source = Image.new("RGB", (600, 180), "white")
+    draw = ImageDraw.Draw(source)
+    draw.line((40, 90, 180, 70), fill="black", width=8)
+    source.save(path)
+
+    signature = _signature_image(path)
+    assert signature is not None
+    assert signature.imageWidth < 200
+    assert signature.hAlign == "CENTER"

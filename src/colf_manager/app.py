@@ -80,6 +80,7 @@ from .permit_rules import (
 )
 from .reporting import (
     annual_payroll_pdf,
+    annual_payments_pdf,
     courtesy_cu_pdf,
     payroll_pdf,
     tfr_annual_pdf,
@@ -2234,6 +2235,26 @@ def create_app(test_config=None):
         flash("Compensazione eliminata", "success")
         return redirect(url_for("expense_detail", expense_id=expense_id))
 
+    @app.post("/expenses/<int:expense_id>/recovery-allocations/<int:allocation_id>/unlock")
+    @login_required
+    def expense_recovery_allocation_unlock(expense_id, allocation_id):
+        allocation = db.get_or_404(ExpenseRecoveryAllocation, allocation_id)
+        if allocation.expense_id != expense_id:
+            abort(404)
+        if allocation.locked_at is None:
+            flash("La quota non risulta consolidata nel cedolino", "info")
+            return redirect(url_for("expense_detail", expense_id=expense_id))
+        allocation.locked_at = None
+        db.session.commit()
+        audit(
+            "expense_recovery_allocation_unlocked",
+            "expense_recovery_allocation",
+            allocation.id,
+            f"expense={expense_id}; month={allocation.due_month.isoformat()}; amount={allocation.amount}",
+        )
+        flash("Regolamento da cedolino annullato: la quota è nuovamente pianificata e modificabile", "success")
+        return redirect(url_for("expense_detail", expense_id=expense_id))
+
     @app.post("/expenses/<int:expense_id>/delete")
     @login_required
     def expense_delete(expense_id):
@@ -2375,14 +2396,22 @@ def create_app(test_config=None):
     @login_required
     def payment_delete(payment_id):
         payment = db.get_or_404(Payment, payment_id)
+        deleted_type = payment.payment_type
+        deleted_amount = Decimal(payment.amount)
+        deleted_status = payment.status
         attachments = PaymentAttachment.query.filter_by(payment_id=payment.id).all()
         for attachment in attachments:
             safe_unlink(Path(app.config["PAYMENT_FOLDER"]) / attachment.stored_name)
             db.session.delete(attachment)
         db.session.delete(payment)
         db.session.commit()
-        audit("payment_deleted", "payment", payment_id)
-        flash("Pagamento eliminato", "success")
+        audit(
+            "payment_deleted",
+            "payment",
+            payment_id,
+            f"type={deleted_type}; amount={deleted_amount}; previous_status={deleted_status}",
+        )
+        flash("Pagamento eliminato: l'importo non risulta più pagato nei riepiloghi e nei report", "success")
         return redirect(url_for("payments"))
 
     @app.get("/payments/attachments/<int:attachment_id>")
@@ -2568,6 +2597,29 @@ def create_app(test_config=None):
             selected.append(payment)
         return selected
 
+    def _paid_payments_in_year(year, worker_id=None):
+        query = Payment.query.filter(
+            Payment.status == "paid",
+            Payment.payment_date >= date(year, 1, 1),
+            Payment.payment_date <= date(year, 12, 31),
+        )
+        if worker_id:
+            query = query.filter(Payment.worker_id == worker_id)
+        return query.order_by(Payment.payment_date, Payment.id).all()
+
+    def _payment_totals(payments):
+        totals = {key: Decimal("0") for key in PAYMENT_LABELS}
+        for payment in payments:
+            if payment.status != "paid":
+                continue
+            totals.setdefault(payment.payment_type, Decimal("0"))
+            totals[payment.payment_type] += Decimal(payment.amount)
+        totals["total"] = sum(
+            (value for key, value in totals.items() if key != "total"),
+            Decimal("0"),
+        )
+        return totals
+
     def _ensure_generated_payment(report, worker, payment_type, amount, period_start, period_end, description):
         amount = Decimal(str(amount or 0)).quantize(Decimal("0.01"))
         if amount <= 0:
@@ -2730,6 +2782,9 @@ def create_app(test_config=None):
         period_payments = _payments_for_period(worker_id, period_start, period_end) if worker_id and period_start else []
         paid_salary = sum((p.amount for p in period_payments if p.status == "paid" and p.payment_type == "salary"), Decimal("0"))
         residual_salary = max(Decimal("0"), (summary["payable"] if summary else Decimal("0")) - paid_salary)
+        annual_paid_payments = _paid_payments_in_year(year, worker_id) if worker_id else []
+        annual_payment_totals = _payment_totals(annual_paid_payments)
+        global_annual_payment_totals = _payment_totals(_paid_payments_in_year(year))
         return render_template(
             "reports.html",
             workers=workers,
@@ -2748,6 +2803,28 @@ def create_app(test_config=None):
             residual_salary=residual_salary,
             created_report=request.args.get("created_report", type=int),
             permit_overview=permit_overview,
+            annual_payment_totals=annual_payment_totals,
+            global_annual_payment_totals=global_annual_payment_totals,
+            payment_labels=PAYMENT_LABELS,
+        )
+
+    @app.get("/reports/payments-annual.pdf")
+    @login_required
+    def annual_payments_report():
+        year = request.args.get("year", type=int)
+        if year is None:
+            abort(400)
+        payments = _paid_payments_in_year(year)
+        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
+        employers = Employer.query.order_by(Employer.last_name, Employer.first_name).all()
+        audit("annual_payments_report_downloaded", "payment", str(year), f"count={len(payments)}")
+        return _archive_pdf(
+            None,
+            "annual_payments",
+            f"pagamenti-effettuati-{year}.pdf",
+            annual_payments_pdf(payments, workers, employers, year),
+            date(year, 1, 1),
+            date(year, 12, 31),
         )
 
     @app.get("/reports/payroll.pdf")
@@ -2831,7 +2908,7 @@ def create_app(test_config=None):
                 _fiscal_data(worker, annual, year),
                 Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
                 approval=_report_approval(worker, "both"),
-                payments=_payments_for_period(worker.id, start, end),
+                payments=_paid_payments_in_year(year, worker.id),
                 permits=permit_metrics(worker, annual_absences, year, end),
                 sickness=sickness_metrics(worker, annual_absences, year, end),
             ),
@@ -2860,7 +2937,7 @@ def create_app(test_config=None):
                 year,
                 _fiscal_data(worker, annual, year),
                 approval=_report_approval(worker, "employer"),
-                payments=_payments_for_period(worker.id, start, end),
+                payments=_paid_payments_in_year(year, worker.id),
             ),
             start,
             end,
@@ -2996,7 +3073,7 @@ def create_app(test_config=None):
                 _fiscal_data(worker, annual, year),
                 Expense.query.filter(Expense.worker_id == worker_id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
                 approval=_report_approval(worker, "none"),
-                payments=_payments_for_period(worker.id, start, end),
+                payments=_paid_payments_in_year(year, worker.id),
                 permits=permit_metrics(worker, trend_absences, year, end),
                 sickness=sickness_metrics(worker, trend_absences, year, end),
             ),

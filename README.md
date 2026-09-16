@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r72-full
+# colf-manager 1.0.0 · build r74-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -119,3 +119,6 @@ Each expense creates a balance owed either to the employer or to the worker. Mul
 - Effective-dated rules encode job-protection and paid-sickness ceilings; the first three consecutive days are paid at 50%, from day four at 100%.
 - The employer may voluntarily pay sickness or permit time beyond the contractual ceiling, tracked separately from the legal entitlement.
 - Every overview indicator has an icon; limited indicators use threshold-aware visual states.
+
+### r74
+Report annuale complessivo dei pagamenti effettuati, totali pagati per categoria, annullamento regolamento spese da cedolino e firme PDF con fondo bianco trasparente.

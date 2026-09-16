@@ -14,6 +14,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Image as RLImage, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from PIL import Image as PILImage
 
 from . import __author__, __build__, __version__
 
@@ -203,13 +204,28 @@ def _signature_image(path):
     if not path or not Path(path).is_file():
         return None
     try:
-        image = RLImage(path)
+        with PILImage.open(path) as source:
+            rgba = source.convert("RGBA")
+            pixels = []
+            for red, green, blue, alpha in rgba.getdata():
+                if red >= 245 and green >= 245 and blue >= 245:
+                    pixels.append((255, 255, 255, 0))
+                else:
+                    pixels.append((red, green, blue, alpha))
+            rgba.putdata(pixels)
+            stream = BytesIO()
+            rgba.save(stream, format="PNG")
+            stream.seek(0)
+        image = RLImage(stream)
+        image._signature_stream = stream
         max_w, max_h = 38 * mm, 16 * mm
         ratio = min(max_w / image.imageWidth, max_h / image.imageHeight)
         image.drawWidth = image.imageWidth * ratio
         image.drawHeight = image.imageHeight * ratio
+        image.hAlign = "CENTER"
         return image
     except Exception:
+        logging.getLogger(__name__).debug("Unable to prepare signature image", exc_info=True)
         return None
 
 
@@ -218,7 +234,30 @@ def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrat
     if not payments and due_amount is None:
         return []
     story = [Paragraph(title, styles["CMSub"])]
-    paid_total = sum((p.amount for p in payments if getattr(p, "status", "") == "paid" and (not due_types or p.payment_type in due_types)), 0)
+    labels = {
+        "salary": "Retribuzione",
+        "inps_contributions": "Contributi INPS",
+        "thirteenth": "Tredicesima",
+        "tfr": "TFR",
+        "expense_refund": "Rimborso spese",
+        "other": "Altro",
+    }
+    paid_rows = [
+        p
+        for p in payments
+        if getattr(p, "status", "") == "paid"
+        and (not due_types or p.payment_type in due_types)
+    ]
+    paid_total = sum((Decimal(p.amount) for p in paid_rows), Decimal("0"))
+    if paid_rows:
+        by_type = {}
+        for payment in paid_rows:
+            by_type[payment.payment_type] = by_type.get(payment.payment_type, Decimal("0")) + Decimal(payment.amount)
+        totals = [["Pagamenti effettuati per categoria", "Importo"]]
+        for payment_type, amount in sorted(by_type.items(), key=lambda item: labels.get(item[0], item[0])):
+            totals.append([labels.get(payment_type, payment_type), _money(amount)])
+        totals.append(["Totale pagamenti effettuati", _money(paid_total)])
+        story.extend([_kv_table(totals), Spacer(1, 5)])
     if due_amount is not None:
         residual = max(due_amount - paid_total, 0)
         story.append(_kv_table([
@@ -229,14 +268,6 @@ def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrat
         ]))
         story.append(Spacer(1, 5))
     if payments:
-        labels = {
-            "salary": "Retribuzione",
-            "inps_contributions": "Contributi INPS",
-            "thirteenth": "Tredicesima",
-            "tfr": "TFR",
-            "expense_refund": "Rimborso spese",
-            "other": "Altro",
-        }
         rows = [["Tipo", "Stato", "Data", "Importo", "Periodo"]]
         for payment in payments:
             period = ""
@@ -484,6 +515,84 @@ def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approv
     return out
 
 
+
+
+def annual_payments_pdf(payments, workers, employers, year):
+    out, doc = _doc("Pagamenti effettuati nell'anno")
+    s = _styles()
+    worker_map = {worker.id: worker for worker in workers}
+    employer_map = {employer.id: employer for employer in employers}
+    labels = {
+        "salary": "Retribuzione",
+        "inps_contributions": "Contributi INPS",
+        "thirteenth": "Tredicesima",
+        "tfr": "TFR",
+        "expense_refund": "Rimborso spese",
+        "other": "Altro",
+    }
+    paid = [
+        payment
+        for payment in payments
+        if payment.status == "paid"
+        and payment.payment_date
+        and payment.payment_date.year == year
+    ]
+    story = [
+        Paragraph("Report complessivo dei pagamenti effettuati", s["CMTitle"]),
+        Paragraph(f"Anno {year}", s["CMSub"]),
+        Paragraph(
+            "Il prospetto comprende esclusivamente i pagamenti marcati come pagati e con data di pagamento nell'anno selezionato.",
+            s["CMBody"],
+        ),
+        Spacer(1, 7),
+    ]
+    by_type = {}
+    for payment in paid:
+        by_type[payment.payment_type] = by_type.get(payment.payment_type, Decimal("0")) + Decimal(payment.amount)
+    totals = [["Categoria", "Totale pagato"]]
+    for payment_type, amount in sorted(by_type.items(), key=lambda item: labels.get(item[0], item[0])):
+        totals.append([labels.get(payment_type, payment_type), _money(amount)])
+    grand_total = sum((Decimal(payment.amount) for payment in paid), Decimal("0"))
+    totals.append(["Totale annuale", _money(grand_total)])
+    story.extend([_kv_table(totals), Spacer(1, 9), Paragraph("Dettaglio pagamenti", s["CMSub"])])
+    rows = [["Data", "Lavoratore", "Datore", "Categoria", "Importo", "Periodo"]]
+    for payment in sorted(paid, key=lambda item: (item.payment_date, item.id)):
+        worker = worker_map.get(payment.worker_id)
+        employer = employer_map.get(payment.employer_id)
+        worker_name = f"{worker.first_name} {worker.last_name}" if worker else "-"
+        employer_name = f"{employer.first_name} {employer.last_name}" if employer else "-"
+        period = "-"
+        if payment.period_start:
+            period = payment.period_start.strftime("%d/%m/%Y")
+        if payment.period_end and payment.period_end != payment.period_start:
+            period += " -> " + payment.period_end.strftime("%d/%m/%Y")
+        rows.append([
+            payment.payment_date.strftime("%d/%m/%Y"),
+            worker_name,
+            employer_name,
+            labels.get(payment.payment_type, payment.payment_type),
+            _money(payment.amount),
+            period,
+        ])
+    if len(rows) == 1:
+        story.append(Paragraph("Nessun pagamento effettuato nell'anno selezionato.", s["CMNote"]))
+    else:
+        table = Table(rows, colWidths=[20*mm, 32*mm, 32*mm, 31*mm, 25*mm, 35*mm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), BRAND),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, PALE]),
+            ("GRID", (0, 0), (-1, -1), 0.3, LINE),
+            ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+            ("FONTSIZE", (0, 0), (-1, -1), 6.2),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("PADDING", (0, 0), (-1, -1), 3),
+        ]))
+        story.append(table)
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    out.seek(0)
+    return out
 
 
 def location_trend_pdf(worker, employer, location_data, year, approval=None, payments=None):

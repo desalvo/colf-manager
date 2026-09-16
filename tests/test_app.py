@@ -1,5 +1,5 @@
 # fmt: off
-from datetime import date, time
+from datetime import date, datetime, time
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -18,6 +18,7 @@ from colf_manager.models import (
     GeneratedReport,
     HourlyRate,
     Location,
+    Payment,
     Setting,
     User,
     WorkEntry,
@@ -1181,3 +1182,133 @@ def test_legacy_work_entry_schema_is_upgraded_on_startup(tmp_path, monkeypatch):
     with legacy_app.app_context():
         columns = {column["name"] for column in sa_inspect(db.engine).get_columns("work_entry")}
         assert {"entry_kind", "paid", "rate_override", "location_id"} <= columns
+
+
+def test_unlock_payroll_expense_allocation_reopens_quota(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    with app.app_context():
+        expense = Expense(
+            worker_id=worker_id,
+            expense_date=date(2026, 9, 10),
+            description="Quota cedolino",
+            amount=Decimal("50.00"),
+            direction="worker_advance",
+            reimbursed=False,
+        )
+        db.session.add(expense)
+        db.session.flush()
+        allocation = ExpenseRecoveryAllocation(
+            expense_id=expense.id,
+            due_month=date(2026, 9, 1),
+            amount=Decimal("50.00"),
+            locked_at=datetime(2026, 9, 30, 12, 0),
+        )
+        db.session.add(allocation)
+        db.session.commit()
+        expense_id, allocation_id = expense.id, allocation.id
+    response = client.post(
+        f"/expenses/{expense_id}/recovery-allocations/{allocation_id}/unlock",
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        allocation = db.session.get(ExpenseRecoveryAllocation, allocation_id)
+        assert allocation.locked_at is None
+
+
+def test_deleted_paid_payment_no_longer_counts_as_paid(app, client):
+    worker_id = make_worker(app)
+    login(client)
+    with app.app_context():
+        payment = Payment(
+            worker_id=worker_id,
+            payment_type="salary",
+            amount=Decimal("123.45"),
+            status="paid",
+            payment_date=date(2026, 9, 15),
+            period_start=date(2026, 9, 1),
+            period_end=date(2026, 9, 30),
+        )
+        db.session.add(payment)
+        db.session.commit()
+        payment_id = payment.id
+    response = client.post(f"/payments/{payment_id}/delete", follow_redirects=False)
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(Payment, payment_id) is None
+        assert Payment.query.filter_by(status="paid").count() == 0
+
+
+def test_reports_show_permit_values_and_annual_payment_totals(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = Decimal("40")
+        db.session.add(
+            Absence(
+                worker_id=worker_id,
+                start_date=date(2026, 9, 10),
+                end_date=date(2026, 9, 10),
+                start_time=time(9),
+                end_time=time(11),
+                kind="permit",
+                paid=True,
+                paid_hours=Decimal("2"),
+                permit_category="medical_visit",
+            )
+        )
+        db.session.add(
+            Payment(
+                worker_id=worker_id,
+                payment_type="salary",
+                amount=Decimal("100.00"),
+                status="paid",
+                payment_date=date(2026, 9, 15),
+                period_start=date(2026, 9, 1),
+                period_end=date(2026, 9, 30),
+            )
+        )
+        db.session.commit()
+    login(client)
+    response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=9")
+    assert response.status_code == 200
+    assert b"Retribuiti mese" in response.data
+    assert b"Maturato" in response.data
+    assert b"Totale annuo" in response.data
+    assert b"Totale pagamenti effettuati" in response.data
+    assert b"100.00" in response.data
+
+
+def test_annual_payments_report_includes_only_paid_entries(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add_all([
+            Payment(
+                worker_id=worker_id,
+                payment_type="salary",
+                amount=Decimal("80.00"),
+                status="paid",
+                payment_date=date(2026, 5, 10),
+            ),
+            Payment(
+                worker_id=worker_id,
+                payment_type="tfr",
+                amount=Decimal("90.00"),
+                status="pending",
+            ),
+        ])
+        db.session.commit()
+    login(client)
+    response = client.get("/reports/payments-annual.pdf?year=2026")
+    assert response.status_code == 200
+    assert response.mimetype == "application/pdf"
+    assert response.data.startswith(b"%PDF")
+
+
+def test_mail_compose_default_body_uses_real_newlines(app, client):
+    login(client)
+    response = client.get("/mail/compose")
+    assert response.status_code == 200
+    assert b"Buongiorno,\n\nin allegato/in questa comunicazione trova il documento richiesto.\n\nCordiali saluti." in response.data
+    assert b"Buongiorno,\\n\\nin allegato/in questa comunicazione" not in response.data

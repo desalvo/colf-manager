@@ -160,3 +160,11 @@ Lutto e nascita restano diritti per evento, senza un falso plafond annuo. L'over
 ## Novità r62: malattia in giorni e indicatori visuali
 
 La malattia è ora registrata esclusivamente in giorni di calendario, senza orari. Il motore seleziona la regola contrattuale vigente per la data: limiti di conservazione del posto e giorni retribuibili sono distinti, con 50% fino al terzo giorno consecutivo e 100% dal quarto. Il datore può autorizzare un trattamento di miglior favore e retribuire giorni di malattia o ore di permesso oltre il limite contrattuale; l'eccedenza resta separata dal diritto residuo. Ogni indicatore dell'overview ha un'icona e, quando esiste un limite, una codifica visuale del livello rispetto alla soglia.
+
+## Pagamenti, spese e firme nei report
+
+I report distinguono gli importi maturati/registrati dai pagamenti effettivamente eseguiti. Nel riepilogo annuale i pagamenti sono mostrati per categoria (retribuzione, contributi INPS, tredicesima, TFR, rimborso spese e altro) e come totale complessivo. Il report "Pagamenti effettuati nell'anno" include tutti i pagamenti con stato Pagato e data di pagamento nell'anno selezionato, con dettaglio per lavoratore, datore, categoria, importo e periodo.
+
+Una quota di spesa già consolidata tramite cedolino può essere riportata allo stato pianificato con "Annulla regolamento" dalla scheda della spesa. La cancellazione di un pagamento rimuove immediatamente quell'importo dai totali pagati e dai successivi report generati.
+
+Se è caricata una firma grafica del lavoratore o del datore, i PDF eliminano il fondo bianco dell'immagine rendendolo trasparente, mantengono le proporzioni e centrano la firma nel relativo campo.

@@ -1,6 +1,15 @@
 # Changelog
 
 
+## r74-full - payments, expense settlement cancellation and PDF signatures
+
+- Transparent, centered graphical signatures in PDF reports.
+- Payroll expense allocations can be returned from consolidated to planned state.
+- Paid totals are derived live from existing payment records; deleted payments no longer count as paid.
+- Permit values expanded in Reports & Payroll.
+- Annual summaries/reports include actual payments by category and total.
+- New annual all-payments PDF report.
+
 ## r72-full - calendar field relevance and automatic permit hours
 
 - Single employer-favorable-treatment control, shown only for permits and sickness.

@@ -160,3 +160,11 @@ Bereavement and childbirth are event-based rights and are not misrepresented as 
 ## r62: sickness in days and visual indicators
 
 Sickness is now recorded exclusively in calendar days, with no clock times. The engine selects the contractual rule effective on the recorded date: job-protection limits and paid-sickness limits are kept separate, with 50% through the third consecutive day and 100% from the fourth day. The employer may authorize more favourable treatment and pay sickness days or permit hours beyond the contractual ceiling; the excess remains separate from the legal/contractual residual entitlement. Every overview indicator has an icon and limited indicators use a visual threshold state.
+
+## Payments, expenses and signatures in reports
+
+Reports distinguish accrued/recorded amounts from payments actually made. The annual summary shows paid amounts by category (salary, INPS contributions, thirteenth salary, TFR, expense reimbursement and other) and as a grand total. The "Payments made during the year" report includes all payments with Paid status and a payment date in the selected year, with worker, employer, category, amount and period details.
+
+A cost allocation already consolidated through payroll can be returned to planned status with "Cancel payroll settlement" from the expense detail page. Deleting a payment immediately removes that amount from paid totals and from subsequently generated reports.
+
+When a graphical worker or employer signature is available, PDFs make the white image background transparent, preserve proportions and center the signature in its field.

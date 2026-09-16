@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "== colf-manager hardening full package r72: local checks =="
+echo "== colf-manager hardening full package r74: local checks =="
 
 required=(
   VERSION
@@ -16,7 +16,7 @@ required=(
 for path in "${required[@]}"; do
   if [[ ! -e "$path" ]]; then
     echo "ERROR: missing $path" >&2
-    echo "Extract full package r72 over a fresh/full clone of desalvo/colf-manager." >&2
+    echo "Extract full package r74 over a fresh/full clone of desalvo/colf-manager." >&2
     exit 2
   fi
 done

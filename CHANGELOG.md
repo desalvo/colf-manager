@@ -1,5 +1,22 @@
 # Changelog
 
+## r85-full - vacation attribution threshold, due highlights and payment receipts
+
+- Defer a multi-month continuous vacation period to its ending month only when the starting month contains at most 3 contractual vacation days.
+- With 4 or more vacation days in the starting month, economically attribute each vacation day to its own month while preserving day-based entitlement consumption.
+- Highlight amounts due and residual amounts in the web UI and payroll reports.
+- Add a professional downloadable PDF receipt for every payment marked Paid, with due amount, actual paid amount, residual and employer signature when available.
+- Add regression coverage for the 3-day/4-day vacation threshold and paid-payment receipt availability.
+
+## r84-full - vacation carry-forward visibility and legacy recalculation
+
+- Recompute vacation remuneration from contractual weekly hours and effective rates, ignoring stale historical `paid_hours` for vacation events.
+- Keep continuous vacation remuneration entirely in the month in which the period ends.
+- Add explicit monthly carry-forward notes in Report e paghe and in monthly payroll PDFs.
+- Show deferred vacation remuneration in earlier months and carried-in remuneration in the ending month.
+- Add regression coverage for legacy 31/07-31/08 vacation data at 20 h/week and EUR 9/hour.
+
+
 ## r83-full - continuous vacation payroll attribution
 
 - Continuous vacation periods spanning multiple months are economically charged in full to the month in which the vacation ends.

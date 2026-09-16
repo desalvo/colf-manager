@@ -129,7 +129,7 @@ In **Impostazioni** è possibile configurare la URL esterna dell'applicazione e 
 Nelle anagrafiche di lavoratore e datore di lavoro è possibile caricare una firma grafica in formato PNG, JPEG, TIFF, WEBP o BMP. Quando il report prevede la firma del soggetto e la firma è registrata, l'immagine viene apposta automaticamente nello spazio firma; in assenza del file resta la linea per la firma manuale. Tutti i PDF riportano inoltre logo di colf-manager, versione/build e autore.
 
 ## Pagamenti e quietanze
-La voce Pagamenti consente di registrare retribuzioni, contributi INPS, tredicesima, TFR, rimborsi spese e altri pagamenti. Ogni voce può essere Da pagare o Pagato e può includere data di pagamento, periodo di competenza, descrizione, note e allegati quali quietanze PDF o immagini. I contributi INPS sono disponibili solo per i lavoratori con posizione INPS registrata.
+La voce Pagamenti consente di registrare retribuzioni, contributi INPS, tredicesima, TFR, rimborsi spese e altri pagamenti. Ogni voce può essere Da pagare o Pagato e può includere data di pagamento, periodo di competenza, descrizione, note e allegati. Gli importi ancora da pagare sono evidenziati nell'interfaccia. Per ogni pagamento con stato **Pagato** è disponibile una quietanza PDF professionale che mostra separatamente importo dovuto, importo effettivamente pagato e residuo; se è stata caricata la firma del datore, viene inserita automaticamente nella quietanza. I contributi INPS sono disponibili solo per i lavoratori con posizione INPS registrata.
 
 La generazione del cedolino mensile crea automaticamente una voce residua Da pagare per la retribuzione e, quando disponibile il calcolo INPS, una voce contributiva. Le quote già registrate come Pagato vengono mostrate nei report e concorrono al calcolo del residuo. Rigenerare un report aggiorna la voce automatica residua invece di duplicarla.
 
@@ -168,3 +168,6 @@ I report distinguono gli importi maturati/registrati dai pagamenti effettivament
 Una quota di spesa già consolidata tramite cedolino può essere riportata allo stato pianificato con "Annulla regolamento" dalla scheda della spesa. La cancellazione di un pagamento rimuove immediatamente quell'importo dai totali pagati e dai successivi report generati.
 
 Se è caricata una firma grafica del lavoratore o del datore, i PDF eliminano il fondo bianco dell'immagine rendendolo trasparente, mantengono le proporzioni e centrano la firma nel relativo campo.
+
+### Imputazione economica delle ferie su più mesi
+Per un periodo continuativo che attraversa più mesi, se nel mese iniziale ricadono **massimo 3 giorni di ferie computabili**, l’intera retribuzione ferie è imputata al mese di fine periodo e il riporto è indicato nell’app e nel cedolino. Se nel mese iniziale ricadono **4 o più giorni**, ogni giorno di ferie è imputato economicamente al proprio mese.

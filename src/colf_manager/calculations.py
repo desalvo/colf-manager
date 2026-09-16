@@ -119,35 +119,65 @@ def vacation_balance(worker, absences, year, as_of=None):
     }
 
 
-def _paid_absence_value(absence, rates, period_start, period_end):
-    if not absence.paid or not absence.paid_hours:
+def _paid_absence_value(absence, rates, period_start, period_end, worker=None):
+    if not absence.paid:
+        return Decimal("0")
+    kind = getattr(absence, "kind", None)
+    if kind != "vacation" and not absence.paid_hours:
         return Decimal("0")
     overlap_start = max(absence.start_date, period_start)
     overlap_end = min(absence.end_date, period_end)
     if overlap_start > overlap_end:
         return Decimal("0")
 
-    kind = getattr(absence, "kind", None)
     if kind == "vacation":
-        # A continuous vacation event is charged economically in the month in
-        # which the event ends.  Entitlement consumption remains day-based and
-        # is still counted on the actual contractual vacation days in each
-        # month, but payroll/payment must not split one continuous vacation
-        # across multiple months.
-        if not (period_start <= absence.end_date <= period_end):
-            return Decimal("0")
-
         total_vacation_days = vacation_working_days(absence.start_date, absence.end_date)
         if total_vacation_days <= 0:
             return Decimal("0")
-        hours_per_vacation_day = Decimal(absence.paid_hours) / Decimal(total_vacation_days)
+
+        # Vacation remuneration is always derived from the contractual weekly
+        # hours when the worker is available. Historical paid_hours values are
+        # only a compatibility fallback for detached/unit tests.
+        hours_per_vacation_day = (
+            vacation_hours_per_day(worker)
+            if worker is not None
+            else Decimal(absence.paid_hours) / Decimal(total_vacation_days)
+        )
         holidays = set()
-        for year in range(absence.start_date.year, absence.end_date.year + 1):
-            holidays |= italian_national_holidays(year)
+        for event_year in range(absence.start_date.year, absence.end_date.year + 1):
+            holidays |= italian_national_holidays(event_year)
+
+        crosses_month = (absence.start_date.year, absence.start_date.month) != (
+            absence.end_date.year,
+            absence.end_date.month,
+        )
+        first_month_end = date(
+            absence.start_date.year,
+            absence.start_date.month,
+            monthrange(absence.start_date.year, absence.start_date.month)[1],
+        )
+        first_month_days = vacation_working_days(
+            absence.start_date, min(absence.end_date, first_month_end)
+        )
+        defer_to_end_month = crosses_month and first_month_days <= 3
+
+        if defer_to_end_month:
+            # Short starts (up to three contractual vacation days in the first
+            # month) are paid entirely in the month in which the continuous
+            # vacation period ends. The day consumption remains on the actual
+            # months of use.
+            if not (period_start <= absence.end_date <= period_end):
+                return Decimal("0")
+            value_days = _days(absence.start_date, absence.end_date)
+        else:
+            # With more than three vacation days in the starting month, each
+            # contractual vacation day is economically charged to its own month.
+            value_days = _days(overlap_start, overlap_end)
+
         return sum(
             (
                 hours_per_vacation_day * rate_on(rates, day)
-                for day in _days(absence.start_date, absence.end_date)
+                for day in value_days
                 if day.weekday() != 6 and day not in holidays
             ),
             Decimal("0"),
@@ -181,7 +211,7 @@ def _paid_absence_total(absences, rates, period_start, period_end, worker=None):
         if not getattr(absence, "paid", False):
             continue
         if getattr(absence, "kind", None) not in {"sickness", "health"}:
-            total += _paid_absence_value(absence, rates, period_start, period_end)
+            total += _paid_absence_value(absence, rates, period_start, period_end, worker)
             continue
         total_days = (absence.end_date - absence.start_date).days + 1
         if total_days <= 0 or not getattr(absence, "paid_hours", None):
@@ -239,6 +269,79 @@ def _expense_due_for_period(expense, period_start, period_end):
         Decimal("0"), amount - settled_through_period - prior_allocated
     )
     return min(current_planned, remaining_before_current)
+
+
+def _vacation_event_value(absence, rates, worker=None):
+    """Return the full economic value of one continuous vacation event."""
+    if not getattr(absence, "paid", False):
+        return Decimal("0")
+    total_days = vacation_working_days(absence.start_date, absence.end_date)
+    if total_days <= 0:
+        return Decimal("0")
+    if worker is not None:
+        hours_per_day = vacation_hours_per_day(worker)
+    elif getattr(absence, "paid_hours", None):
+        hours_per_day = Decimal(absence.paid_hours) / Decimal(total_days)
+    else:
+        return Decimal("0")
+    holidays = set()
+    for event_year in range(absence.start_date.year, absence.end_date.year + 1):
+        holidays |= italian_national_holidays(event_year)
+    return sum(
+        (
+            hours_per_day * rate_on(rates, day)
+            for day in _days(absence.start_date, absence.end_date)
+            if day.weekday() != 6 and day not in holidays
+        ),
+        Decimal("0"),
+    )
+
+
+def _vacation_payroll_notes(vacation_absences, rates, period_start, period_end, worker=None):
+    """Describe vacation remuneration carried to the end month of an event."""
+    notes = []
+    carry_in = Decimal("0")
+    deferred = Decimal("0")
+    for absence in vacation_absences:
+        overlap_start = max(absence.start_date, period_start)
+        overlap_end = min(absence.end_date, period_end)
+        if overlap_start > overlap_end or (
+            absence.start_date.month == absence.end_date.month
+            and absence.start_date.year == absence.end_date.year
+        ):
+            continue
+        first_month_end = date(
+            absence.start_date.year,
+            absence.start_date.month,
+            monthrange(absence.start_date.year, absence.start_date.month)[1],
+        )
+        first_month_days = vacation_working_days(
+            absence.start_date, min(absence.end_date, first_month_end)
+        )
+        if first_month_days > 3:
+            # Normal monthly competence: no carry/defer note is required.
+            continue
+        amount = money(_vacation_event_value(absence, rates, worker))
+        start_label = absence.start_date.strftime("%d/%m/%Y")
+        end_label = absence.end_date.strftime("%d/%m/%Y")
+        end_month = absence.end_date.strftime("%m/%Y")
+        if period_start <= absence.end_date <= period_end:
+            carry_in += amount
+            notes.append(
+                f"Ferie {start_label}–{end_label}: € {amount:.2f} imputati interamente a {end_month}; "
+                "l'importo comprende anche la quota dei giorni fruiti nei mesi precedenti."
+            )
+        else:
+            deferred += amount
+            notes.append(
+                f"Ferie {start_label}–{end_label}: retribuzione complessiva € {amount:.2f} non imputata in questo mese; "
+                f"riportata a {end_month}, mese di fine del periodo continuativo."
+            )
+    return {
+        "notes": notes,
+        "carry_in": money(carry_in),
+        "deferred": money(deferred),
+    }
 
 
 def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=TFR_DIVISOR, worker=None):
@@ -306,6 +409,10 @@ def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=
         )
     )
 
+    vacation_payroll = _vacation_payroll_notes(
+        vacation_absences, rates, period_start, period_end, worker
+    )
+
     worker_advances = sum(
         (
             _expense_due_for_period(e, period_start, period_end)
@@ -339,6 +446,9 @@ def monthly_summary(entries, absences, expenses, rates, year, month, tfr_factor=
         "paid_permit_pay": money(paid_permit_pay),
         "sickness_pay": money(sickness_pay),
         "vacation_pay": money(vacation_pay),
+        "vacation_pay_carry_in": vacation_payroll["carry_in"],
+        "vacation_pay_deferred": vacation_payroll["deferred"],
+        "vacation_payroll_notes": vacation_payroll["notes"],
         "paid_absence": money(paid_absence),
         "vacation_days_used_month": money(vacation_days_used_month),
         "worker_advances": money(worker_advances),

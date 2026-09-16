@@ -1578,3 +1578,151 @@ def test_vacation_daily_value_for_20_hours_week_at_9_euro(app):
         hours = vacation_hours_per_day(worker)
         assert hours.quantize(Decimal("0.0001")) == Decimal("3.3331")
         assert money(hours * Decimal("9.00")) == Decimal("30.00")
+
+
+def test_vacation_legacy_paid_hours_are_recomputed_and_carry_is_reported(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        worker.weekly_hours = Decimal("20")
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=Decimal("9.00")))
+        # Simulate a legacy event saved with only 25 days worth of paid_hours.
+        stale_paid_hours = vacation_hours_per_day(worker) * Decimal("25")
+        db.session.add(
+            Absence(
+                worker_id=worker_id,
+                start_date=date(2026, 7, 31),
+                end_date=date(2026, 8, 31),
+                kind="vacation",
+                paid=True,
+                paid_hours=stale_paid_hours,
+            )
+        )
+        db.session.commit()
+
+        rates = HourlyRate.query.filter_by(worker_id=worker_id).all()
+        absences = Absence.query.filter_by(worker_id=worker_id).all()
+        july = monthly_summary([], absences, [], rates, 2026, 7, worker=worker)
+        august = monthly_summary([], absences, [], rates, 2026, 8, worker=worker)
+
+        assert july["vacation_pay"] == Decimal("0.00")
+        assert july["vacation_pay_deferred"] == Decimal("779.94")
+        assert august["vacation_pay"] == Decimal("779.94")
+        assert august["vacation_pay_carry_in"] == Decimal("779.94")
+        assert "riportata a 08/2026" in july["vacation_payroll_notes"][0]
+        assert "mesi precedenti" in august["vacation_payroll_notes"][0]
+
+    login(client)
+    july_page = client.get(f"/reports?worker_id={worker_id}&year=2026&month=7")
+    assert july_page.status_code == 200
+    assert b"Riporto retribuzione ferie" in july_page.data
+    assert b"Retribuzione ferie rinviata" in july_page.data
+    assert b"779.94" in july_page.data
+
+    august_page = client.get(f"/reports?worker_id={worker_id}&year=2026&month=8")
+    assert august_page.status_code == 200
+    assert b"Riporto ferie incluso nel mese" in august_page.data
+    assert b"779.94" in august_page.data
+
+
+def test_vacation_more_than_three_days_in_start_month_stays_in_each_month(app):
+    with app.app_context():
+        worker = Worker(
+            first_name="Anna",
+            last_name="Ferie",
+            employment_start=date(2026, 1, 1),
+            weekly_hours=Decimal("20"),
+        )
+        rates = [HourlyRate(valid_from=date(2026, 1, 1), amount=Decimal("9.00"))]
+        absence = Absence(
+            start_date=date(2026, 7, 28),
+            end_date=date(2026, 8, 31),
+            kind="vacation",
+            paid=True,
+            paid_hours=Decimal("999"),  # legacy value must not drive the calculation
+        )
+
+        july = monthly_summary([], [absence], [], rates, 2026, 7, worker=worker)
+        august = monthly_summary([], [absence], [], rates, 2026, 8, worker=worker)
+
+        assert july["vacation_days_used_month"] == Decimal("4.00")
+        assert july["vacation_pay"] == Decimal("119.99")
+        assert august["vacation_days_used_month"] == Decimal("25.00")
+        assert august["vacation_pay"] == Decimal("749.94")
+        assert july["vacation_pay_deferred"] == Decimal("0.00")
+        assert august["vacation_pay_carry_in"] == Decimal("0.00")
+
+
+def test_payment_receipt_is_available_only_for_paid_payments(app, client):
+    with app.app_context():
+        employer = Employer(first_name="Mario", last_name="Datore", city="Roma")
+        db.session.add(employer)
+        db.session.flush()
+        worker = Worker(
+            employer_id=employer.id,
+            first_name="Anna",
+            last_name="Lavoratrice",
+            employment_start=date(2026, 1, 1),
+            weekly_hours=Decimal("20"),
+        )
+        db.session.add(worker)
+        db.session.flush()
+        paid = Payment(
+            worker_id=worker.id,
+            employer_id=employer.id,
+            payment_type="other",
+            amount=Decimal("123.45"),
+            status="paid",
+            payment_date=date(2026, 9, 16),
+            period_start=date(2026, 9, 1),
+            period_end=date(2026, 9, 30),
+        )
+        pending = Payment(
+            worker_id=worker.id,
+            employer_id=employer.id,
+            payment_type="other",
+            amount=Decimal("50.00"),
+            status="pending",
+            period_start=date(2026, 9, 1),
+            period_end=date(2026, 9, 30),
+        )
+        db.session.add_all([paid, pending])
+        db.session.commit()
+        paid_id, pending_id = paid.id, pending.id
+
+    login(client)
+    response = client.get(f"/payments/{paid_id}/receipt.pdf")
+    assert response.status_code == 200
+    assert response.mimetype == "application/pdf"
+    assert response.data.startswith(b"%PDF")
+    assert "quietanza-pagamento" in response.headers.get("Content-Disposition", "")
+
+    assert client.get(f"/payments/{pending_id}/receipt.pdf").status_code == 404
+    detail = client.get(f"/payments/{paid_id}")
+    assert b"Scarica quietanza PDF" in detail.data
+
+
+def test_vacation_exactly_three_days_in_start_month_is_deferred(app):
+    with app.app_context():
+        worker = Worker(
+            first_name="Anna",
+            last_name="Ferie",
+            employment_start=date(2026, 1, 1),
+            weekly_hours=Decimal("20"),
+        )
+        rates = [HourlyRate(valid_from=date(2026, 1, 1), amount=Decimal("9.00"))]
+        absence = Absence(
+            start_date=date(2026, 7, 29),
+            end_date=date(2026, 8, 31),
+            kind="vacation",
+            paid=True,
+            paid_hours=Decimal("999"),
+        )
+        july = monthly_summary([], [absence], [], rates, 2026, 7, worker=worker)
+        august = monthly_summary([], [absence], [], rates, 2026, 8, worker=worker)
+
+        assert july["vacation_days_used_month"] == Decimal("3.00")
+        assert july["vacation_pay"] == Decimal("0.00")
+        assert july["vacation_pay_deferred"] == Decimal("839.94")
+        assert august["vacation_pay"] == Decimal("839.94")
+        assert august["vacation_pay_carry_in"] == Decimal("839.94")

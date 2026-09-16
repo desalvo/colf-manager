@@ -129,7 +129,7 @@ Workers and employers now include City, Province and Postal Code. Report signatu
 Worker and employer records can store a graphic signature in PNG, JPEG, TIFF, WEBP or BMP format. When a report requires that party's signature and a signature is registered, the image is automatically placed in the signature area; otherwise a manual signature line is shown. Every PDF also carries the colf-manager logo, version/build and author.
 
 ## Payments and receipts
-The Payments section records salary payments, INPS contributions, thirteenth-month salary, TFR, expense reimbursements and other payments. Each record can be Pending or Paid and can include payment date, reference period, description, notes and supporting attachments such as PDF receipts or images. INPS contribution payments are available only for workers with an INPS position recorded.
+The Payments section records salary payments, INPS contributions, thirteenth-month salary, TFR, expense reimbursements and other payments. Each record can be Pending or Paid and can include payment date, reference period, description, notes and supporting attachments. Amounts still due are visually highlighted in the UI. Every payment marked **Paid** provides a professional downloadable PDF receipt showing the amount due, the amount actually paid and the residual; when an employer signature is stored, it is inserted automatically in the receipt. INPS contribution payments are available only for workers with an INPS position recorded.
 
 Generating a monthly payslip automatically creates a residual Pending salary item and, when an INPS calculation is available, a contribution item. Amounts already recorded as Paid are shown in reports and reduce the displayed residual. Regenerating a report updates the automatic residual item instead of creating uncontrolled duplicates.
 
@@ -168,3 +168,6 @@ Reports distinguish accrued/recorded amounts from payments actually made. The an
 A cost allocation already consolidated through payroll can be returned to planned status with "Cancel payroll settlement" from the expense detail page. Deleting a payment immediately removes that amount from paid totals and from subsequently generated reports.
 
 When a graphical worker or employer signature is available, PDFs make the white image background transparent, preserve proportions and center the signature in its field.
+
+### Economic allocation of vacation spanning multiple months
+For one continuous vacation period spanning multiple months, if the starting month contains **at most 3 contractual vacation days**, the entire vacation remuneration is charged to the ending month and the carry-forward is shown in the UI and payroll PDF. If the starting month contains **4 or more days**, each vacation day is economically charged to its own month.

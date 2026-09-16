@@ -89,6 +89,7 @@ from .reporting import (
     location_trend_pdf,
     thirteenth_payroll_pdf,
     combined_thirteenth_tfr_pdf,
+    payment_receipt_pdf,
 )
 from .storage import cleanup_orphan_files, safe_unlink, store_report
 from .mailer import send_smtp_message
@@ -2356,6 +2357,51 @@ def create_app(test_config=None):
         payment.notes = (request.form.get("notes") or "").strip() or None
         return payment
 
+    def _payment_due_amount(payment, worker):
+        """Best available due amount for a payment receipt.
+
+        For report-backed standard categories we recalculate the contractual
+        amount for the referenced full month/year. For arbitrary/manual
+        periods and categories without a deterministic calculation, the
+        registered payment amount is the conservative fallback.
+        """
+        fallback = Decimal(payment.amount)
+        start = payment.period_start
+        end = payment.period_end
+        try:
+            if payment.payment_type == "salary" and start and end:
+                if (
+                    start.year == end.year
+                    and start.month == end.month
+                    and start.day == 1
+                    and end.day == monthrange(end.year, end.month)[1]
+                ):
+                    return Decimal(get_summary(worker.id, start.year, start.month)["payable"])
+                if start == date(start.year, 1, 1) and end == date(start.year, 12, 31):
+                    _, annual, _ = get_annual(worker.id, start.year)
+                    return Decimal(annual["payable"])
+            if payment.payment_type in {"thirteenth", "tfr"} and start:
+                worker_obj, entries, absences_list, expenses_list, rates_list = _worker_data(worker.id)
+                year = (end or start).year
+                cutoff = end or date(year, 12, 31)
+                if payment.payment_type == "thirteenth":
+                    result = thirteenth_year_summary(
+                        worker_obj, entries, absences_list, expenses_list, rates_list, year, cutoff
+                    )
+                    return Decimal(result["thirteenth"])
+                result = tfr_year_summary(
+                    worker_obj, entries, absences_list, expenses_list, rates_list, year, cutoff, _tfr_factor()
+                )
+                return Decimal(result["tfr_accrual"])
+            if payment.payment_type == "inps_contributions" and start and end and start.year == end.year and start.month == end.month:
+                summary = get_summary(worker.id, start.year, start.month)
+                fiscal = inps_contribution_summary(worker, summary, start.year)
+                if fiscal and not fiscal.get("unavailable"):
+                    return Decimal(fiscal.get("total") or fallback)
+        except (ValueError, TypeError, ArithmeticError):
+            pass
+        return fallback
+
     def _add_payment_attachments(payment):
         added = []
         for uploaded in request.files.getlist("attachments"):
@@ -2398,6 +2444,8 @@ def create_app(test_config=None):
             query = query.filter_by(worker_id=worker_id)
         rows = query.order_by(Payment.created_at.desc(), Payment.id.desc()).all()
         workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
+        pending_total = sum((Decimal(p.amount) for p in rows if p.status == "pending"), Decimal("0"))
+        paid_total = sum((Decimal(p.amount) for p in rows if p.status == "paid"), Decimal("0"))
         return render_template(
             "payments.html",
             payments=rows,
@@ -2405,6 +2453,8 @@ def create_app(test_config=None):
             payment_labels=PAYMENT_LABELS,
             selected_worker=worker_id,
             today=date.today().isoformat(),
+            pending_total=pending_total,
+            paid_total=paid_total,
         )
 
     @app.get("/payments/<int:payment_id>")
@@ -2423,6 +2473,38 @@ def create_app(test_config=None):
             attachments=attachments,
             source_report=report,
             payment_labels=PAYMENT_LABELS,
+        )
+
+    @app.get("/payments/<int:payment_id>/receipt.pdf")
+    @login_required
+    def payment_receipt(payment_id):
+        payment = db.get_or_404(Payment, payment_id)
+        if payment.status != "paid":
+            abort(404)
+        worker = db.session.get(Worker, payment.worker_id)
+        if not worker:
+            abort(404)
+        employer = db.session.get(Employer, payment.employer_id) if payment.employer_id else _employer_for(worker)
+        due_amount = _payment_due_amount(payment, worker)
+        buffer = payment_receipt_pdf(
+            payment,
+            worker,
+            employer,
+            due_amount,
+            PAYMENT_LABELS.get(payment.payment_type, payment.payment_type),
+            _signature_path(employer),
+        )
+        audit(
+            "payment_receipt_downloaded",
+            "payment",
+            payment.id,
+            f"due={due_amount}; paid={payment.amount}",
+        )
+        return send_file(
+            buffer,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=f"quietanza-pagamento-{payment.id}.pdf",
         )
 
     @app.route("/payments/<int:payment_id>/edit", methods=["GET", "POST"])
@@ -2839,6 +2921,11 @@ def create_app(test_config=None):
         residual_salary = max(Decimal("0"), (summary["payable"] if summary else Decimal("0")) - paid_salary)
         annual_paid_payments = _paid_payments_in_year(year, worker_id) if worker_id else []
         annual_payment_totals = _payment_totals(annual_paid_payments)
+        annual_residual_salary = max(
+            Decimal("0"),
+            (Decimal(annual["payable"]) if annual else Decimal("0"))
+            - Decimal(annual_payment_totals.get("salary", 0)),
+        )
         global_annual_payment_totals = _payment_totals(_paid_payments_in_year(year))
         annual_permit_paid_hours = sum(
             (Decimal(str(item.get("paid_year") or 0)) for item in permit_overview),
@@ -2867,6 +2954,7 @@ def create_app(test_config=None):
             created_report=request.args.get("created_report", type=int),
             permit_overview=permit_overview,
             annual_payment_totals=annual_payment_totals,
+            annual_residual_salary=annual_residual_salary,
             global_annual_payment_totals=global_annual_payment_totals,
             payment_labels=PAYMENT_LABELS,
             annual_permit_paid_hours=annual_permit_paid_hours,

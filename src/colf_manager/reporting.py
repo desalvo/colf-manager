@@ -36,6 +36,8 @@ def _styles():
     styles.add(ParagraphStyle(name="CMNote", parent=styles["BodyText"], textColor=colors.HexColor("#5f6d69"), fontSize=7.5, leading=10))
     styles.add(ParagraphStyle(name="CMRight", parent=styles["BodyText"], alignment=TA_RIGHT, fontSize=8))
     styles.add(ParagraphStyle(name="CMCenter", parent=styles["BodyText"], alignment=TA_CENTER, fontSize=8))
+    styles.add(ParagraphStyle(name="CMAmountLabel", parent=styles["BodyText"], alignment=TA_CENTER, fontSize=8, textColor=MUTED, leading=10))
+    styles.add(ParagraphStyle(name="CMAmountValue", parent=styles["BodyText"], alignment=TA_CENTER, fontName="Helvetica-Bold", fontSize=16, leading=19, textColor=BRAND))
     return styles
 
 
@@ -246,6 +248,85 @@ def _signature_image(path):
         return None
 
 
+
+def _amount_callout(due_amount, paid_amount=None, residual_amount=None, styles=None):
+    """High-visibility amount summary used in payroll reports and receipts."""
+    styles = styles or _styles()
+    cells = [
+        [
+            Paragraph("IMPORTO DOVUTO", styles["CMAmountLabel"]),
+            Paragraph("IMPORTO PAGATO", styles["CMAmountLabel"]),
+            Paragraph("RESIDUO", styles["CMAmountLabel"]),
+        ],
+        [
+            Paragraph(_money(due_amount), styles["CMAmountValue"]),
+            Paragraph(_money(paid_amount or 0), styles["CMAmountValue"]),
+            Paragraph(_money(residual_amount if residual_amount is not None else max(Decimal(due_amount) - Decimal(paid_amount or 0), Decimal("0"))), styles["CMAmountValue"]),
+        ],
+    ]
+    table = Table(cells, colWidths=[53*mm, 53*mm, 53*mm])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#fff3cf")),
+        ("BACKGROUND", (1,0), (1,-1), colors.HexColor("#e5f6ed")),
+        ("BACKGROUND", (2,0), (2,-1), colors.HexColor("#fde9e6")),
+        ("BOX", (0,0), (-1,-1), 0.7, LINE),
+        ("INNERGRID", (0,0), (-1,-1), 0.4, LINE),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("ALIGN", (0,0), (-1,-1), "CENTER"),
+        ("TOPPADDING", (0,0), (-1,-1), 7),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 7),
+    ]))
+    return table
+
+
+def payment_receipt_pdf(payment, worker, employer, due_amount, payment_label, employer_signature=None):
+    """Create a professional receipt for one payment marked as paid."""
+    out, doc = _doc(f"Quietanza pagamento #{payment.id}")
+    styles = _styles()
+    paid = Decimal(payment.amount)
+    due = Decimal(due_amount if due_amount is not None else payment.amount)
+    residual = max(due - paid, Decimal("0"))
+    payment_date = payment.payment_date or date.today()
+    period = "—"
+    if payment.period_start:
+        period = payment.period_start.strftime("%d/%m/%Y")
+        if payment.period_end and payment.period_end != payment.period_start:
+            period += " → " + payment.period_end.strftime("%d/%m/%Y")
+
+    story = [
+        Paragraph("QUIETANZA DI PAGAMENTO", styles["CMTitle"]),
+        Paragraph(f"Pagamento #{payment.id} · {payment_label}", styles["CMSub"]),
+        _party_block(worker, employer, styles),
+        Spacer(1, 10),
+        _amount_callout(due, paid, residual, styles),
+        Spacer(1, 10),
+        _kv_table([
+            ["Dettaglio quietanza", "Valore"],
+            ["Data pagamento", payment_date.strftime("%d/%m/%Y")],
+            ["Periodo di riferimento", period],
+            ["Categoria", payment_label],
+            ["Importo dovuto", _money(due)],
+            ["Importo effettivamente pagato", _money(paid)],
+            ["Residuo dopo questo pagamento", _money(residual)],
+            ["Descrizione", payment.description or "—"],
+        ]),
+        Spacer(1, 10),
+        Paragraph(
+            "Il datore di lavoro attesta che l'importo indicato come effettivamente pagato è stato liquidato al lavoratore per la causale e il periodo sopra riportati. La quietanza documenta il singolo pagamento registrato nell'applicazione.",
+            styles["CMBody"],
+        ),
+    ]
+    approval = {
+        "mode": "employer",
+        "place": (getattr(employer, "city", None) or getattr(employer, "address", None) or "") if employer else "",
+        "date": payment_date,
+        "employer_signature": employer_signature,
+    }
+    story += _signature_story(worker, employer, styles, approval)
+    doc.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    out.seek(0)
+    return out
+
 def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrati", due_types=None):
     payments = list(payments or [])
     if not payments and due_amount is None:
@@ -276,13 +357,8 @@ def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrat
         totals.append(["Totale pagamenti effettuati", _money(paid_total)])
         story.extend([_kv_table(totals), Spacer(1, 5)])
     if due_amount is not None:
-        residual = max(due_amount - paid_total, 0)
-        story.append(_kv_table([
-            ["Situazione liquidazione", "Importo"],
-            ["Dovuto / maturato nel prospetto", _money(due_amount)],
-            ["Quota già liquidata registrata", _money(paid_total)],
-            ["Residuo da liquidare", _money(residual)],
-        ]))
+        residual = max(Decimal(due_amount) - paid_total, Decimal("0"))
+        story.append(_amount_callout(Decimal(due_amount), paid_total, residual, styles))
         story.append(Spacer(1, 5))
     if payments:
         rows = [["Tipo", "Stato", "Data", "Importo", "Periodo"]]
@@ -446,6 +522,18 @@ def payroll_pdf(worker, summary, year, month, employer=None, vacation=None, fisc
     story = [Paragraph(title, s["CMTitle"]), Paragraph(f"Periodo {month:02d}/{year}", s["CMSub"]), _party_block(worker, employer, s), Spacer(1, 7)]
     rows = [["Voce", "Valore"], ["Ore totali registrate", str(summary["worked_hours"])], ["Ore ordinarie", str(summary.get("ordinary_hours", 0))], ["Ore straordinarie", str(summary.get("overtime_hours", 0))], ["Ore non retribuite", str(summary.get("unpaid_work_hours", 0))], ["Retribuzione ore", _money(summary["worked_pay"])], ["Malattia / permessi / ferie retribuiti", _money(summary["paid_absence"])], ["Anticipi lavoratore da rimborsare", _money(summary["worker_advances"])], ["Anticipi datore da recuperare", _money(summary["employer_advances"])], ["Rettifica netta spese/anticipi", _money(summary["reimbursements"])], ["Retribuzione registrata", _money(summary["gross"])], ["Quota tredicesima maturata (stima)", _money(summary.get("thirteenth_accrual", 0))], ["Quota TFR maturata (stima)", _money(summary["tfr_accrual"])], ["Totale da corrispondere", _money(summary["payable"])]]
     story.append(_kv_table(rows))
+    paid_salary = sum(
+        (Decimal(p.amount) for p in (payments or []) if getattr(p, "status", "") == "paid" and getattr(p, "payment_type", "") == "salary"),
+        Decimal("0"),
+    )
+    salary_residual = max(Decimal(summary["payable"]) - paid_salary, Decimal("0"))
+    story += [Spacer(1, 7), Paragraph("Importo complessivo da pagare", s["CMSub"]), _amount_callout(summary["payable"], paid_salary, salary_residual, s)]
+    vacation_notes = list(summary.get("vacation_payroll_notes") or [])
+    if vacation_notes:
+        story += [Paragraph("Note ferie e riporto retribuzione", s["CMSub"])]
+        for note in vacation_notes:
+            story.append(Paragraph(note, s["CMNote"]))
+        story.append(Spacer(1, 5))
     if vacation:
         story += [Paragraph("Ferie", s["CMSub"]), _kv_table([["Situazione ferie", "Giorni"],["Maturate alla data", str(vacation["accrued"])],["Proiezione fine anno", str(vacation["projected"])],["Godute/programmate", str(vacation["used_scheduled"])],["Disponibili secondo impostazione", str(vacation["available_usable"])]])]
     story += _sickness_story(sickness, s)
@@ -470,6 +558,12 @@ def annual_payroll_pdf(worker, employer, annual, year, vacation, fiscal=None, ex
     t=Table(rows,colWidths=[15*mm,25*mm,31*mm,31*mm,30*mm,32*mm],repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),BRAND),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,PALE]),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#c8d8d2")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("FONTSIZE",(0,0),(-1,-1),7.2),("PADDING",(0,0),(-1,-1),4)]))
     story += [t, Paragraph("Totali annuali",s["CMSub"]), _kv_table([["Voce","Valore"],["Ore",str(annual["worked_hours"])],["Retribuzione registrata",_money(annual["gross"])],["Quota tredicesima maturata",_money(annual["thirteenth_accrual"])],["TFR maturato",_money(annual["tfr_accrual"])],["Totale corrispondibile registrato",_money(annual["payable"])]]), Paragraph("Ferie annuali",s["CMSub"]), _kv_table([["Ferie","Giorni"],["Maturate",str(vacation["accrued"])],["Maturabili entro 31/12",str(vacation["projected"])],["Godute/programmate",str(vacation["used_scheduled"])],["Disponibili",str(vacation["available_usable"])]]), Spacer(1,8), Paragraph("Prospetto gestionale annuale; non sostituisce gli adempimenti ufficiali.",s["CMNote"])]
+    annual_paid_salary = sum(
+        (Decimal(p.amount) for p in (payments or []) if getattr(p, "status", "") == "paid" and getattr(p, "payment_type", "") == "salary"),
+        Decimal("0"),
+    )
+    annual_salary_residual = max(Decimal(annual["payable"]) - annual_paid_salary, Decimal("0"))
+    story += [Spacer(1, 7), Paragraph("Importo complessivo annuale da pagare", s["CMSub"]), _amount_callout(annual["payable"], annual_paid_salary, annual_salary_residual, s)]
     story += _sickness_story(sickness, s)
     story += _permit_story(permits, s)
     story += _expense_story(expenses, s, date(year, 12, 31))

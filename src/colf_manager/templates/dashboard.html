@@ -1,11 +1,11 @@
 {% extends 'base.html' %}{% block content %}
-{% macro metric(icon, label, value, unit='', limit=None, mode='usage', note='') -%}
+{% macro metric(icon, label, value, unit='', limit=None, mode='usage', note='', extra_class='') -%}
   {% set status = '' %}
   {% if limit is not none and limit|float > 0 %}
     {% if mode == 'remaining' %}{% set ratio = 1 - ((value|float) / (limit|float)) %}{% else %}{% set ratio = (value|float) / (limit|float) %}{% endif %}
     {% if ratio >= 0.9 %}{% set status='metric-danger' %}{% elif ratio >= 0.7 %}{% set status='metric-warning' %}{% else %}{% set status='metric-safe' %}{% endif %}
   {% endif %}
-  <article class="metric-card {{status}}">
+  <article class="metric-card {{status}} {{extra_class}}">
     <span class="metric-icon" aria-hidden="true">{{icon}}</span>
     <span class="metric-label">{{label}}</span>
     <strong>{{value}}</strong>{% if unit %}<small>{{unit}}</small>{% endif %}
@@ -23,7 +23,7 @@
     {{metric('🕘','Ore ordinarie','%.2f'|format(stats.ordinary_hours),'h')}}
     {{metric('⚡','Ore straordinarie','%.2f'|format(stats.overtime_hours),'h')}}
     {{metric('○','Ore lavoro non retribuite','%.2f'|format(stats.unpaid_work_hours),'h')}}
-    {{metric('💶','Da corrispondere','€ %.2f'|format(stats.pay))}}
+    {{metric('💶','Da corrispondere','€ %.2f'|format(stats.pay),'',None,'usage','','payment-due-highlight')}}
     {{metric('🏦','TFR mese','€ %.2f'|format(stats.tfr))}}
     {{metric('🎁','Tredicesima maturata nel mese','€ %.2f'|format(stats.thirteenth_month))}}
     {{metric('📅','Tredicesima annua maturata finora','€ %.2f'|format(stats.thirteenth_ytd))}}

@@ -2381,3 +2381,20 @@ def test_pdf_reports_have_total_pages_notes_and_worker_signature(app, client):
     total = len(reader.pages)
     for number, page in enumerate(reader.pages, 1):
         assert f"Pagina {number} di {total}" in (page.extract_text() or "")
+
+
+def test_report_table_cells_wrap_long_unbroken_text_within_column():
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph
+    from colf_manager.reporting import _styles, _wrap_table_rows
+
+    rows = _wrap_table_rows(
+        [["Descrizione"], ["TESTOLUNGHISSIMO" * 30]],
+        _styles(),
+    )
+    cell = rows[1][0]
+    assert isinstance(cell, Paragraph)
+    width, height = cell.wrap(20 * mm, 1000)
+    assert width <= 20 * mm
+    assert height > cell.style.leading
+    assert cell.style.wordWrap == "CJK"

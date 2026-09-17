@@ -1,5 +1,6 @@
 # fmt: off
 from io import BytesIO
+from html import escape
 import logging
 from calendar import monthrange
 from datetime import date
@@ -40,6 +41,8 @@ def _styles():
     styles.add(ParagraphStyle(name="CMCenter", parent=styles["BodyText"], alignment=TA_CENTER, fontSize=8))
     styles.add(ParagraphStyle(name="CMAmountLabel", parent=styles["BodyText"], alignment=TA_CENTER, fontSize=8, textColor=MUTED, leading=10))
     styles.add(ParagraphStyle(name="CMAmountValue", parent=styles["BodyText"], alignment=TA_CENTER, fontName="Helvetica-Bold", fontSize=16, leading=19, textColor=BRAND))
+    styles.add(ParagraphStyle(name="CMTable", parent=styles["BodyText"], textColor=TEXT, fontSize=7.2, leading=9, wordWrap="CJK", splitLongWords=True))
+    styles.add(ParagraphStyle(name="CMTableHeader", parent=styles["BodyText"], textColor=colors.white, fontName="Helvetica-Bold", fontSize=7.2, leading=9, wordWrap="CJK", splitLongWords=True))
     return styles
 
 
@@ -173,6 +176,29 @@ def _doc(title):
     return out, doc
 
 
+def _wrap_table_rows(rows, styles=None, header_rows=1):
+    """Return table cells as wrapping Paragraphs so text never escapes columns.
+
+    Existing ReportLab flowables (Paragraph, Image, nested Table, etc.) are kept
+    untouched. Plain text is XML-escaped and rendered with CJK word wrapping,
+    which also breaks very long tokens/identifiers that contain no spaces.
+    """
+    styles = styles or _styles()
+    wrapped = []
+    for row_index, row in enumerate(rows):
+        converted = []
+        for value in row:
+            if hasattr(value, "wrap") and hasattr(value, "drawOn"):
+                converted.append(value)
+                continue
+            text = "" if value is None else str(value)
+            text = escape(text).replace("\n", "<br/>")
+            style_name = "CMTableHeader" if row_index < header_rows else "CMTable"
+            converted.append(Paragraph(text, styles[style_name]))
+        wrapped.append(converted)
+    return wrapped
+
+
 def _party_block(worker, employer, styles):
     e = employer
     emp = f"{e.first_name} {e.last_name}" if e else "Datore di lavoro non associato"
@@ -194,8 +220,8 @@ def _party_block(worker, employer, styles):
     if getattr(worker, "contract_number", None):
         worker_details.append(f"Contratto {worker.contract_number}")
     rows = [
-        [Paragraph("<b>Datore di lavoro</b>", styles["CMBody"]), Paragraph("<b>Lavoratore</b>", styles["CMBody"])],
-        [Paragraph(emp + ("<br/>" + "<br/>".join(emp_details) if emp_details else ""), styles["CMBody"]), Paragraph("<br/>".join(worker_details), styles["CMBody"])],
+        [Paragraph("<b>Datore di lavoro</b>", styles["CMTable"]), Paragraph("<b>Lavoratore</b>", styles["CMTable"])],
+        [Paragraph(emp + ("<br/>" + "<br/>".join(emp_details) if emp_details else ""), styles["CMTable"]), Paragraph("<br/>".join(worker_details), styles["CMTable"])],
     ]
     t = Table(rows, colWidths=[80*mm, 80*mm])
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),PALE),("BOX",(0,0),(-1,-1),0.5,colors.HexColor("#c8d8d2")),("INNERGRID",(0,0),(-1,-1),0.3,colors.HexColor("#dbe5e1")),("VALIGN",(0,0),(-1,-1),"TOP"),("PADDING",(0,0),(-1,-1),7)]))
@@ -203,7 +229,7 @@ def _party_block(worker, employer, styles):
 
 
 def _kv_table(rows):
-    t = Table(rows, colWidths=[112*mm, 48*mm])
+    t = Table(_wrap_table_rows(rows), colWidths=[112*mm, 48*mm])
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),BRAND),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,PALE]),("GRID",(0,0),(-1,-1),0.35,colors.HexColor("#c8d8d2")),("ALIGN",(1,1),(1,-1),"RIGHT"),("PADDING",(0,0),(-1,-1),6)]))
     return t
 
@@ -268,7 +294,7 @@ def _expense_story(expenses, styles, as_of=None):
             _money(settled + payroll_allocated),
             _money(residual),
         ])
-    table = Table(rows, colWidths=[20*mm, 54*mm, 29*mm, 22*mm, 23*mm, 22*mm], repeatRows=1)
+    table = Table(_wrap_table_rows(rows, styles), colWidths=[20*mm, 54*mm, 29*mm, 22*mm, 23*mm, 22*mm], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), BRAND),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -499,7 +525,7 @@ def _payment_story(payments, styles, due_amount=None, title="Pagamenti registrat
                 _money(payment.amount),
                 period or "—",
             ])
-        table = Table(rows, colWidths=[31*mm, 22*mm, 24*mm, 31*mm, 25*mm, 39*mm], repeatRows=1)
+        table = Table(_wrap_table_rows(rows, styles), colWidths=[31*mm, 22*mm, 24*mm, 31*mm, 25*mm, 39*mm], repeatRows=1)
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), ACCENT),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -654,7 +680,7 @@ def _permit_story(permits, styles):
             f"{item.get('unpaid_year', 0)} h",
             remaining,
         ])
-    table = Table(rows, colWidths=[46*mm, 22*mm, 22*mm, 22*mm, 22*mm, 22*mm], repeatRows=1)
+    table = Table(_wrap_table_rows(rows, styles), colWidths=[46*mm, 22*mm, 22*mm, 22*mm, 22*mm, 22*mm], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), BRAND),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -727,7 +753,7 @@ def annual_payroll_pdf(worker, employer, annual, year, vacation, fiscal=None, ex
     rows=[["Mese","Ore","Retribuzione","Malattia/permessi/ferie","Spese nette","Da corrispondere"]]
     for i, m in enumerate(annual["months"], 1):
         rows.append([f"{i:02d}", str(m["worked_hours"]), _money(m["worked_pay"]), _money(m["paid_absence"]), _money(m["reimbursements"]), _money(m["payable"])])
-    t=Table(rows,colWidths=[15*mm,25*mm,31*mm,31*mm,30*mm,32*mm],repeatRows=1)
+    t=Table(_wrap_table_rows(rows, s),colWidths=[15*mm,25*mm,31*mm,31*mm,30*mm,32*mm],repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),BRAND),("TEXTCOLOR",(0,0),(-1,0),colors.white),("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,PALE]),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#c8d8d2")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("FONTSIZE",(0,0),(-1,-1),7.2),("PADDING",(0,0),(-1,-1),4)]))
     story += [t, Paragraph("Totali annuali",s["CMSub"]), _kv_table([["Voce","Valore"],["Ore",str(annual["worked_hours"])],["Retribuzione registrata",_money(annual["gross"])],["Quota tredicesima maturata",_money(annual["thirteenth_accrual"])],["TFR maturato",_money(annual["tfr_accrual"])],["Totale corrispondibile registrato",_money(annual["payable"])]]), Paragraph("Ferie annuali",s["CMSub"]), _kv_table([["Ferie","Giorni"],["Maturate",str(vacation["accrued"])],["Maturabili entro 31/12",str(vacation["projected"])],["Godute/programmate",str(vacation["used_scheduled"])],["Disponibili",str(vacation["available_usable"])]]), Spacer(1,8), Paragraph("Prospetto gestionale annuale; non sostituisce gli adempimenti ufficiali.",s["CMNote"])]
     annual_paid_salary = sum(
@@ -794,7 +820,7 @@ def trend_pdf(worker, employer, annual, year, fiscal=None, expenses=None, approv
     rows=[["Mese","Ore","Retribuzione","Da corrispondere"]]
     for i, m in enumerate(annual["months"], 1):
         rows.append([f"{i:02d}/{year}", str(m["worked_hours"]), _money(m["gross"]), _money(m["payable"])])
-    t=Table(rows,colWidths=[35*mm,35*mm,45*mm,45*mm],repeatRows=1)
+    t=Table(_wrap_table_rows(rows, s),colWidths=[35*mm,35*mm,45*mm,45*mm],repeatRows=1)
     t.setStyle(TableStyle([("BACKGROUND",(0,0),(-1,0),BRAND),("TEXTCOLOR",(0,0),(-1,0),colors.white),("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.white,PALE]),("GRID",(0,0),(-1,-1),0.3,colors.HexColor("#c8d8d2")),("ALIGN",(1,1),(-1,-1),"RIGHT"),("FONTSIZE",(0,0),(-1,-1),7.5),("PADDING",(0,0),(-1,-1),4)]))
     story += [t,Spacer(1,8),Paragraph(f"Totale ore: {annual['worked_hours']} · Retribuzione registrata: {_money(annual['gross'])}",s["CMBody"])]
     story += _expense_story(expenses, s, date(year, 12, 31))
@@ -875,7 +901,7 @@ def annual_payments_pdf(payments, workers, employers, year, worker_signatures=No
         story.append(Paragraph("Nessun pagamento effettuato nell'anno selezionato.", s["CMNote"]))
     else:
         table = Table(
-            rows,
+            _wrap_table_rows(rows, s),
             colWidths=[18*mm, 27*mm, 27*mm, 27*mm, 28*mm, 22*mm, 31*mm],
             repeatRows=1,
         )
@@ -918,7 +944,7 @@ def location_trend_pdf(worker, employer, location_data, year, approval=None, pay
         totals = [["Luogo", "Ore annuali"]]
         for item in location_data:
             totals.append([item["location"], f'{item["total"]:.2f}'])
-        table = Table(totals, colWidths=[125*mm, 35*mm], repeatRows=1)
+        table = Table(_wrap_table_rows(totals, s), colWidths=[125*mm, 35*mm], repeatRows=1)
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), BRAND),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -933,7 +959,7 @@ def location_trend_pdf(worker, employer, location_data, year, approval=None, pay
         rows = [month_headers]
         for item in location_data:
             rows.append([item["location"]] + [f"{value:.2f}" for value in item["months"]] + [f'{item["total"]:.2f}'])
-        detail = Table(rows, colWidths=[48*mm] + [8.4*mm] * 12 + [12*mm], repeatRows=1)
+        detail = Table(_wrap_table_rows(rows, s), colWidths=[48*mm] + [8.4*mm] * 12 + [12*mm], repeatRows=1)
         detail.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), BRAND),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),

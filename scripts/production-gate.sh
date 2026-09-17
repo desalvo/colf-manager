@@ -116,7 +116,7 @@ if any(count < 2 for count in pages.values()):
 
 evidence = {
     "version": "1.0.0",
-    "overlay_revision": "r100-full",
+    "overlay_revision": "r101-full",
     "status": "passed",
     "manual_pages": pages,
     "checks": [

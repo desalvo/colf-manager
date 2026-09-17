@@ -1,6 +1,14 @@
 # Changelog
 
 
+
+## r101-full - robust PDF table wrapping
+
+- report PDF: all data-table text cells are rendered as wrapping ReportLab paragraphs;
+- long text and tokens without spaces are broken within the assigned column width instead of overflowing;
+- party/employer-worker table uses the same robust wrapping rules;
+- regression test covers a deliberately long unbroken value.
+
 ## r100-full - report PDF layout, page totals, legal/privacy notes and signatures
 
 - Keep report section headings with their related content on the same PDF page whenever the section fits; oversized sections may flow naturally across pages.

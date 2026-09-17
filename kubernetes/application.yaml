@@ -56,6 +56,8 @@ spec:
               value: "1"
             - name: COLF_MANAGER_SESSION_MINUTES
               value: "60"
+            - name: COLF_MANAGER_SESSION_PROTECTION
+              value: "basic"
             - name: TMPDIR
               value: /data/tmp
             - name: TMP

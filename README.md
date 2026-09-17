@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r96-full
+# colf-manager 1.0.0 · build r99-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -18,7 +18,7 @@ docker compose up -d --build
 
 Open `http://localhost:8000`. The initial user is `admin`; its initial password is `COLF_MANAGER_ADMIN_PASSWORD` and must be changed on first login. Production mode refuses to start with missing or placeholder secrets.
 
-For local HTTP Docker Compose keep `COLF_MANAGER_SECURE_COOKIES=0`; set it to `1` behind HTTPS/Ingress. Login is rate-limited, state-changing requests are CSRF-protected, and session cookies use HttpOnly/SameSite. Administrators can create additional users from the **Users** page.
+For local HTTP Docker Compose keep `COLF_MANAGER_SECURE_COOKIES=0`; set it to `1` behind HTTPS/Ingress. Login is rate-limited, state-changing requests are CSRF-protected, and session cookies use HttpOnly/SameSite. Flask-Login session protection defaults to `basic` to avoid false immediate logouts behind reverse proxies/Ingress; set `COLF_MANAGER_SESSION_PROTECTION=strong` only when the client identifier is stable. Administrators can create additional users from the **Users** page.
 
 The calendar supports direct entry and drag-and-drop rescheduling. Rates are effective-dated and unique per worker/effective date. Paid absences spanning months or rate changes are split across the applicable days. Worker advances increase the amount due as reimbursements; employer advances reduce it as recoveries.
 
@@ -122,3 +122,5 @@ Each expense creates a balance owed either to the employer or to the worker. Mul
 
 ### r74
 Report annuale complessivo dei pagamenti effettuati, totali pagati per categoria, annullamento regolamento spese da cedolino e firme PDF con fondo bianco trasparente.
+
+- r99: archived reports can be regenerated and replaced in place using the graphical ↻ action while preserving the same archive record.

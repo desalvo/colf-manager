@@ -670,3 +670,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 .calendar-date-jump button{min-height:36px;padding:6px 12px}
 .pattern-usage{font-size:9px;font-weight:900;color:var(--muted)}
 @media(max-width:850px){.calendar-date-jump{width:100%;align-items:end}.calendar-date-jump label{flex:1 1 72px}.calendar-date-jump select,.calendar-date-jump input{width:100%!important}.calendar-date-jump button{flex:0 0 auto}}
+
+/* r98 payments: compact totals + searchable/sortable/paginated collapsible history. */
+.payments-summary-column{min-width:0}.compact-payment-totals{gap:10px;margin-bottom:12px}.compact-payment-totals article{padding:10px 14px;min-height:0;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:12px}.compact-payment-totals small{margin:0;font-size:11px;line-height:1.15}.compact-payment-totals strong{font-size:22px;line-height:1;white-space:nowrap}.payment-legend{padding:16px 18px}.payment-legend h2{margin-top:0}.payment-legend p{margin:7px 0}.payment-history-search{display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:10px;align-items:end;margin-bottom:14px}.payment-history-search label{margin:0}.payment-history-table th a{color:inherit;text-decoration:none;white-space:nowrap}.payment-history-table th a:hover{text-decoration:underline}.payment-history>.collapsible-content{padding-top:16px}
+@media(max-width:850px){.payment-history-search{grid-template-columns:1fr}.compact-payment-totals article{padding:9px 11px}.compact-payment-totals strong{font-size:20px}}

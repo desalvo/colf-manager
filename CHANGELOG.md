@@ -1,5 +1,29 @@
 # Changelog
 
+
+## r99-full - archived report regeneration
+
+- Added a graphical **Rigenera** (↻) action to each archived report, with accessible text hint and confirmation.
+- Regeneration rebuilds the selected report from current data and replaces its archived PDF in place while preserving the same database record/ID.
+- The replacement updates SHA-256, size, MIME metadata and physical storage atomically; the previous file is deleted only after commit.
+- Added regression coverage for in-place replacement and ID preservation.
+
+## r98-full - payments archive usability
+
+- payment history is sortable by every data column, with period descending as the default order
+- payment history is searchable across the full archive before pagination
+- payment history is paginated at 15 rows per page
+- payment history is open by default and persists user open/closed overrides through the shared collapsible-state cookie
+- new payment is collapsed by default and persists its state through the shared collapsible-state cookie
+- payment totals were vertically compacted to reduce page length
+- removed duplicate euro symbols from monetary values on the Payments page
+
+## r97-full - robust login sessions behind proxies
+
+- Changed Flask-Login session protection default from `strong` to `basic` so legitimate reverse-proxy/Ingress client-address changes no longer invalidate the authenticated session immediately after login.
+- Added `COLF_MANAGER_SESSION_PROTECTION` (`basic`, `strong`, or `none`) and documented/configured the safer `basic` default for Docker Compose and Kubernetes.
+- Added regression coverage for a login followed by a request whose apparent client address changes.
+
 ## r96-full - direct calendar navigation and usage-ranked shortcuts
 
 - Added explicit day/month/year controls to jump directly to any calendar date while preserving the selected calendar view.

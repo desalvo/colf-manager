@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r96-full
+# colf-manager 1.0.0 · build r99-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -14,7 +14,7 @@ docker compose up -d --build
 
 Aprire `http://localhost:8000`. L'utente iniziale è `admin`; la password è quella definita in `COLF_MANAGER_ADMIN_PASSWORD`. Al primo accesso viene richiesto il cambio password. In modalità produzione l'applicazione rifiuta di avviarsi con segreti mancanti o placeholder.
 
-Per Docker Compose in HTTP locale `COLF_MANAGER_SECURE_COOKIES=0`; dietro HTTPS/Ingress impostarlo a `1`. Il login è protetto da rate limiting, tutte le operazioni mutative da CSRF e le sessioni usano cookie HttpOnly/SameSite. Gli amministratori possono creare ulteriori utenti da **Utenti**.
+Per Docker Compose in HTTP locale `COLF_MANAGER_SECURE_COOKIES=0`; dietro HTTPS/Ingress impostarlo a `1`. Il login è protetto da rate limiting, tutte le operazioni mutative da CSRF e le sessioni usano cookie HttpOnly/SameSite. La protezione sessione Flask-Login usa di default `basic` per evitare logout immediati spurii dietro reverse proxy/Ingress; usare `COLF_MANAGER_SESSION_PROTECTION=strong` solo se l’identificatore client è stabile. Gli amministratori possono creare ulteriori utenti da **Utenti**.
 
 Il calendario permette inserimento e spostamento drag & drop. Le tariffe sono storicizzate e univoche per lavoratore/data di decorrenza. Le assenze retribuite che attraversano mesi o cambi tariffa vengono ripartite sui giorni interessati. Gli anticipi della lavoratore aumentano il dovuto (rimborso), quelli del datore lo riducono (recupero).
 
@@ -102,3 +102,5 @@ Ogni spesa crea una partita a credito del datore o del lavoratore. È possibile 
 - Regole contrattuali versionate per periodo con 10/45/180 giorni di conservazione del posto e 8/10/15 giorni retribuibili in base all'anzianità; primi 3 giorni al 50%, dal 4° al 100%.
 - Possibilità per il datore di retribuire volontariamente malattia e permessi oltre il limite contrattuale, con eccedenza separata.
 - Overview con icona su ogni indicatore e stato cromatico per gli indicatori soggetti a limite.
+
+- r99: i report archiviati possono essere rigenerati e sostituiti in-place tramite l'azione grafica ↻, mantenendo lo stesso record di archivio.

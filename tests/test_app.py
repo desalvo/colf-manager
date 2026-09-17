@@ -85,6 +85,26 @@ def test_admin_login_and_dashboard(client):
     assert client.get("/").status_code == 200
 
 
+def test_default_session_protection_survives_proxy_client_identifier_change(app):
+    client = app.test_client()
+    response = client.post(
+        "/login",
+        data={"username": "admin", "password": "Test-password-123"},
+        environ_overrides={"REMOTE_ADDR": "10.0.0.10", "HTTP_USER_AGENT": "test-browser"},
+    )
+    assert response.status_code == 302
+    response = client.get(
+        "/",
+        environ_overrides={"REMOTE_ADDR": "10.0.0.11", "HTTP_USER_AGENT": "test-browser"},
+    )
+    assert response.status_code == 200
+    assert b"Please log in to access this page." not in response.data
+
+
+def test_session_protection_setting_is_basic_by_default(app):
+    assert app.login_manager.session_protection == "basic"
+
+
 def test_initial_user_is_admin(app):
     with app.app_context():
         user = User.query.filter_by(username="admin").one()
@@ -2014,7 +2034,7 @@ def test_reports_currency_values_have_two_decimal_digits(app, client):
     response = client.get(f"/reports?worker_id={worker_id}&year=2026&month=1")
     assert response.status_code == 200
     assert "€ 10,00".encode() in response.data
-    assert "€ 10.0<".encode() not in response.data
+    assert "€ €".encode("utf-8") not in response.data
 
 
 def test_payment_method_defaults_to_bank_transfer_and_can_be_changed(app, client):
@@ -2215,3 +2235,115 @@ def test_all_current_collapsible_templates_have_persistent_keys():
     assert 'data-collapse-key="reports-annual-summary"' in reports
     assert 'data-collapse-key="reports-permits"' in reports
     assert 'data-collapse-key="reports-archive"' in reports
+
+
+def test_payments_history_search_sort_pagination_and_collapsible_sections(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        for idx in range(16):
+            month = idx + 1 if idx < 12 else 12
+            day = idx + 1 if idx < 28 else 28
+            db.session.add(
+                Payment(
+                    worker_id=worker_id,
+                    payment_type="salary" if idx % 2 == 0 else "other",
+                    payment_method="bank_transfer" if idx % 2 == 0 else "cash",
+                    amount=Decimal(f"{100 + idx}.00"),
+                    status="paid" if idx % 2 == 0 else "pending",
+                    payment_date=date(2026, month, min(day, 28)),
+                    period_start=date(2026, month, 1),
+                    period_end=date(2026, month, 28),
+                    description=f"Pagamento archivio {idx:02d}",
+                    notes="needle-speciale" if idx == 3 else "",
+                )
+            )
+        db.session.commit()
+
+    login(client)
+
+    response = client.get(f"/payments?worker_id={worker_id}")
+    assert response.status_code == 200
+    assert b'data-collapse-key="payments-new-payment"' in response.data
+    assert b'<details class="card collapsible-card payment-history" id="payment-history" data-collapse-key="payments-history" open>' in response.data
+    assert b"massimo 15 per pagina" in response.data
+    assert b"Pagina 1 di 2" in response.data
+    assert response.data.count(b'href="/payments/') >= 15
+    assert b"2026-12-01" in response.data
+
+    page_two = client.get(f"/payments?worker_id={worker_id}&page=2")
+    assert page_two.status_code == 200
+    assert b"Pagina 2 di 2" in page_two.data
+
+    searched = client.get(f"/payments?worker_id={worker_id}&q=needle-speciale")
+    assert searched.status_code == 200
+    assert b"1 risultati su 16 pagamenti" in searched.data
+    assert b"103,00" in searched.data
+
+    sorted_amount = client.get(f"/payments?worker_id={worker_id}&sort=amount&dir=asc")
+    assert sorted_amount.status_code == 200
+    first = sorted_amount.data.find(b"100,00")
+    later = sorted_amount.data.find(b"115,00")
+    assert first >= 0
+    assert later == -1  # 16th result belongs to page 2 when ordered ascending.
+
+
+def test_payments_compact_totals_css_present(app, client):
+    login(client)
+    response = client.get("/payments")
+    assert response.status_code == 200
+    assert b"compact-payment-totals" in response.data
+    assert "€ €".encode("utf-8") not in response.data
+
+
+def test_archived_report_can_be_regenerated_in_place(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=10))
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 1, 5),
+                start_time=time(9),
+                end_time=time(10),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
+        db.session.commit()
+    login(client)
+    created = client.get(f"/reports/payroll.pdf?worker_id={worker_id}&year=2026&month=1")
+    assert created.status_code == 200
+    with app.app_context():
+        report = GeneratedReport.query.one()
+        report_id = report.id
+        old_stored_name = report.stored_name
+        old_path = Path(app.config["REPORT_FOLDER"]) / old_stored_name
+        assert old_path.is_file()
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 1, 6),
+                start_time=time(9),
+                end_time=time(12),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
+        db.session.commit()
+
+    page = client.get(f"/reports?worker_id={worker_id}&year=2026&month=1")
+    assert page.status_code == 200
+    assert f'/reports/archive/{report_id}/regenerate'.encode() in page.data
+    assert "Rigenera e sostituisci il report".encode() in page.data
+
+    response = client.post(f"/reports/archive/{report_id}/regenerate")
+    assert response.status_code == 302
+    with app.app_context():
+        assert GeneratedReport.query.count() == 1
+        report = db.session.get(GeneratedReport, report_id)
+        assert report is not None
+        assert report.stored_name != old_stored_name
+        assert (Path(app.config["REPORT_FOLDER"]) / report.stored_name).is_file()
+        assert not old_path.exists()
+        assert report.size_bytes > 0
+        assert len(report.sha256) == 64

@@ -502,7 +502,17 @@ def create_app(test_config=None):
 
     login = LoginManager(app)
     login.login_view = "login"
-    login.session_protection = "strong"
+    session_protection = os.getenv("COLF_MANAGER_SESSION_PROTECTION", "basic").strip().lower()
+    if session_protection not in {"basic", "strong", "none"}:
+        raise RuntimeError(
+            "COLF_MANAGER_SESSION_PROTECTION must be one of: basic, strong, none"
+        )
+    # ``strong`` invalidates the whole login session whenever Flask-Login's
+    # client identifier changes.  Behind reverse proxies / ingress controllers
+    # the apparent client address can legitimately vary between the login POST
+    # and the following request, producing intermittent immediate logouts.
+    # ``basic`` keeps the authentication session and only marks it non-fresh.
+    login.session_protection = None if session_protection == "none" else session_protection
 
     @app.context_processor
     def application_metadata():
@@ -2556,6 +2566,139 @@ def create_app(test_config=None):
             if target:
                 safe_unlink(Path(app.config["REPORT_FOLDER"]) / target)
 
+    def _regenerate_archived_report_buffer(report):
+        """Rebuild an archived report from current data without creating a new archive row."""
+        worker = db.session.get(Worker, report.worker_id) if report.worker_id else None
+        period_start = report.period_start
+        period_end = report.period_end
+        reference = period_start or period_end
+        year = reference.year if reference else None
+
+        if report.report_type == "annual_payments":
+            if year is None:
+                raise ValueError("Periodo del report non disponibile")
+            return annual_payments_pdf(
+                _paid_payments_in_year(year),
+                Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
+                Employer.query.order_by(Employer.last_name, Employer.first_name).all(),
+                year,
+            )
+
+        if worker is None or year is None:
+            raise ValueError("Lavoratore o periodo del report non disponibile")
+
+        if report.report_type == "monthly_payroll":
+            month = period_start.month if period_start else reference.month
+            start = period_start or date(year, month, 1)
+            end = period_end or date(year, month, monthrange(year, month)[1])
+            worker, _, absences_list, expenses_list, _ = _worker_data(worker.id)
+            summary = get_summary(worker.id, year, month)
+            vacation = vacation_balance(worker, absences_list, year, min(date.today(), date(year, 12, 31)))
+            return payroll_pdf(
+                worker,
+                summary,
+                year,
+                month,
+                _employer_for(worker),
+                vacation,
+                _fiscal_data(worker, summary, year),
+                [x for x in expenses_list if _expense_relevant_to_period(x, start, end)],
+                approval=_report_approval(worker, "both"),
+                payments=_payments_for_period(worker.id, start, end),
+                permits=permit_metrics(worker, absences_list, year, end),
+                sickness=sickness_metrics(worker, absences_list, year, end),
+            )
+
+        if report.report_type == "annual_payroll":
+            worker, annual, vacation = get_annual(worker.id, year)
+            start, end = period_start or date(year, 1, 1), period_end or date(year, 12, 31)
+            annual_absences = Absence.query.filter_by(worker_id=worker.id).all()
+            return annual_payroll_pdf(
+                worker, _employer_for(worker), annual, year, vacation,
+                _fiscal_data(worker, annual, year),
+                Expense.query.filter(Expense.worker_id == worker.id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
+                approval=_report_approval(worker, "both"),
+                payments=_paid_payments_in_year(year, worker.id),
+                permits=permit_metrics(worker, annual_absences, year, end),
+                sickness=sickness_metrics(worker, annual_absences, year, end),
+            )
+
+        if report.report_type == "courtesy_cu":
+            worker, annual, _ = get_annual(worker.id, year)
+            return courtesy_cu_pdf(
+                worker, _employer_for(worker), annual, year, _fiscal_data(worker, annual, year),
+                approval=_report_approval(worker, "employer"),
+                payments=_paid_payments_in_year(year, worker.id),
+            )
+
+        if report.report_type in {"tfr", "thirteenth", "thirteenth_tfr"}:
+            worker, entries, absences_list, expenses_list, rates_list = _worker_data(worker.id)
+            start = period_start or date(year, 1, 1)
+            cutoff = period_end or (date(year, 12, 31) if year < date.today().year else date.today())
+            payments = _payments_for_period(worker.id, start, cutoff)
+            if report.report_type == "tfr":
+                data = tfr_year_summary(worker, entries, absences_list, expenses_list, rates_list, year, cutoff, _tfr_factor())
+                return tfr_annual_pdf(
+                    worker, _employer_for(worker), data, year, _rule_notes(year),
+                    _fiscal_data(worker, data, year), approval=_report_approval(worker, "both"),
+                    payments=[p for p in payments if p.payment_type == "tfr"],
+                )
+            if report.report_type == "thirteenth":
+                data = thirteenth_year_summary(worker, entries, absences_list, expenses_list, rates_list, year, cutoff)
+                annual = annual_summary(
+                    [e for e in entries if e.work_date <= cutoff],
+                    [a for a in absences_list if a.start_date <= cutoff],
+                    [x for x in expenses_list if x.expense_date <= cutoff],
+                    rates_list, year, _tfr_factor(), worker,
+                )
+                return thirteenth_payroll_pdf(
+                    worker, _employer_for(worker), data, year, _rule_notes(year),
+                    _fiscal_data(worker, annual, year), approval=_report_approval(worker, "both"),
+                    payments=[p for p in payments if p.payment_type == "thirteenth"],
+                )
+            data = combined_thirteenth_tfr_summary(
+                worker, entries, absences_list, expenses_list, rates_list, year, cutoff, _tfr_factor()
+            )
+            return combined_thirteenth_tfr_pdf(
+                worker, _employer_for(worker), data, year, _rule_notes(year),
+                approval=_report_approval(worker, "both"),
+                payments=[p for p in payments if p.payment_type in {"thirteenth", "tfr"}],
+            )
+
+        if report.report_type == "trend":
+            worker, annual, _ = get_annual(worker.id, year)
+            start, end = period_start or date(year, 1, 1), period_end or date(year, 12, 31)
+            trend_absences = Absence.query.filter_by(worker_id=worker.id).all()
+            return trend_pdf(
+                worker, _employer_for(worker), annual, year, _fiscal_data(worker, annual, year),
+                Expense.query.filter(Expense.worker_id == worker.id, Expense.expense_date >= start, Expense.expense_date <= end).order_by(Expense.expense_date).all(),
+                approval=_report_approval(worker, "none"), payments=_paid_payments_in_year(year, worker.id),
+                permits=permit_metrics(worker, trend_absences, year, end),
+                sickness=sickness_metrics(worker, trend_absences, year, end),
+            )
+
+        if report.report_type == "location_trend":
+            start, end = period_start or date(year, 1, 1), period_end or date(year, 12, 31)
+            entries = WorkEntry.query.filter(
+                WorkEntry.worker_id == worker.id, WorkEntry.work_date >= start, WorkEntry.work_date <= end
+            ).order_by(WorkEntry.work_date, WorkEntry.start_time).all()
+            by_location = {}
+            for entry in entries:
+                label = entry.location or "Luogo non specificato"
+                row = by_location.setdefault(label, {"total": Decimal("0"), "months": [Decimal("0") for _ in range(12)]})
+                row["total"] += entry.hours
+                row["months"][entry.work_date.month - 1] += entry.hours
+            location_data = [
+                {"location": label, "total": values["total"], "months": values["months"]}
+                for label, values in sorted(by_location.items(), key=lambda item: (-item[1]["total"], item[0].lower()))
+            ]
+            return location_trend_pdf(
+                worker, _employer_for(worker), location_data, year, approval=_report_approval(worker, "none"),
+                payments=_payments_for_period(worker.id, start, end),
+            )
+
+        raise ValueError(f"Tipo di report non rigenerabile: {report.report_type}")
+
     def _add_payment_attachments(payment):
         added = []
         for uploaded in request.files.getlist("attachments"):
@@ -2612,21 +2755,107 @@ def create_app(test_config=None):
         query = Payment.query
         if worker_id:
             query = query.filter_by(worker_id=worker_id)
-        rows = query.all()
+        all_rows = query.all()
+        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
+        worker_map = {worker.id: worker for worker in workers}
 
-        def payment_period_sort_key(payment):
+        # Totals always describe the whole selected archive, never just the current page.
+        pending_total = sum((Decimal(p.amount) for p in all_rows if p.status == "pending"), Decimal("0"))
+        paid_total = sum((Decimal(p.amount) for p in all_rows if p.status == "paid"), Decimal("0"))
+
+        search = (request.args.get("q") or "").strip()
+        rows = all_rows
+        if search:
+            needle = search.casefold()
+
+            def payment_matches(payment):
+                worker = worker_map.get(payment.worker_id)
+                worker_name = f"{worker.first_name} {worker.last_name}" if worker else ""
+                status_label = "Pagato" if payment.status == "paid" else "Da pagare"
+                period_parts = []
+                for value in (payment.period_start, payment.period_end, payment.payment_date):
+                    if value:
+                        period_parts.extend([value.isoformat(), value.strftime("%d/%m/%Y")])
+                amount = Decimal(payment.amount)
+                searchable = " ".join(
+                    [
+                        str(payment.id),
+                        status_label,
+                        payment.status or "",
+                        worker_name,
+                        PAYMENT_LABELS.get(payment.payment_type, payment.payment_type or ""),
+                        payment.payment_type or "",
+                        PAYMENT_METHOD_LABELS.get(payment.payment_method, payment.payment_method or ""),
+                        payment.payment_method or "",
+                        payment.description or "",
+                        payment.notes or "",
+                        f"{amount:.2f}",
+                        f"{amount:.2f}".replace(".", ","),
+                        *period_parts,
+                    ]
+                ).casefold()
+                return needle in searchable
+
+            rows = [payment for payment in rows if payment_matches(payment)]
+
+        sort_key = (request.args.get("sort") or "period").strip().lower()
+        sort_dir = (request.args.get("dir") or "desc").strip().lower()
+        allowed_sorts = {"status", "date", "worker", "type", "method", "period", "amount"}
+        if sort_key not in allowed_sorts:
+            sort_key = "period"
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "desc"
+
+        def period_key(payment):
             period_date = payment.period_end or payment.period_start or payment.payment_date
             if period_date is None and payment.created_at:
                 period_date = payment.created_at.date()
             return (period_date or date.min, payment.period_start or date.min, payment.id)
 
-        rows.sort(key=payment_period_sort_key, reverse=True)
-        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
-        pending_total = sum((Decimal(p.amount) for p in rows if p.status == "pending"), Decimal("0"))
-        paid_total = sum((Decimal(p.amount) for p in rows if p.status == "paid"), Decimal("0"))
+        def worker_key(payment):
+            worker = worker_map.get(payment.worker_id)
+            if not worker:
+                return ("", "", payment.id)
+            return ((worker.last_name or "").casefold(), (worker.first_name or "").casefold(), payment.id)
+
+        key_functions = {
+            "status": lambda payment: (payment.status or "", payment.id),
+            "date": lambda payment: (payment.payment_date or date.min, payment.id),
+            "worker": worker_key,
+            "type": lambda payment: (PAYMENT_LABELS.get(payment.payment_type, payment.payment_type or "").casefold(), payment.id),
+            "method": lambda payment: (PAYMENT_METHOD_LABELS.get(payment.payment_method, payment.payment_method or "").casefold(), payment.id),
+            "period": period_key,
+            "amount": lambda payment: (Decimal(payment.amount), payment.id),
+        }
+        rows.sort(key=key_functions[sort_key], reverse=(sort_dir == "desc"))
+
+        per_page = 15
+        filtered_total = len(rows)
+        pages = max(1, (filtered_total + per_page - 1) // per_page)
+        page = max(1, request.args.get("page", 1, type=int) or 1)
+        page = min(page, pages)
+        start = (page - 1) * per_page
+        page_rows = rows[start : start + per_page]
+
+        def payment_history_url(**updates):
+            args = {
+                "worker_id": worker_id,
+                "q": search or None,
+                "sort": sort_key,
+                "dir": sort_dir,
+                "page": page,
+            }
+            args.update(updates)
+            return url_for("payments", **{key: value for key, value in args.items() if value not in (None, "")})
+
+        sort_urls = {}
+        for column in allowed_sorts:
+            next_dir = "asc" if sort_key != column or sort_dir == "desc" else "desc"
+            sort_urls[column] = payment_history_url(sort=column, dir=next_dir, page=1)
+
         return render_template(
             "payments.html",
-            payments=rows,
+            payments=page_rows,
             workers=workers,
             payment_labels=PAYMENT_LABELS,
             payment_method_labels=PAYMENT_METHOD_LABELS,
@@ -2634,6 +2863,16 @@ def create_app(test_config=None):
             today=date.today().isoformat(),
             pending_total=pending_total,
             paid_total=paid_total,
+            payment_total=len(all_rows),
+            payment_filtered_total=filtered_total,
+            payment_search=search,
+            payment_sort=sort_key,
+            payment_dir=sort_dir,
+            payment_sort_urls=sort_urls,
+            payment_page=page,
+            payment_pages=pages,
+            payment_prev_url=payment_history_url(page=page - 1) if page > 1 else None,
+            payment_next_url=payment_history_url(page=page + 1) if page < pages else None,
         )
 
     @app.get("/payments/<int:payment_id>")
@@ -3779,6 +4018,31 @@ def create_app(test_config=None):
         )
         flash("Stato approvazione report aggiornato", "success")
         return redirect(request.referrer or url_for("reports"))
+
+    @app.post("/reports/archive/<int:report_id>/regenerate")
+    @login_required
+    def regenerate_archived_report(report_id):
+        report = db.get_or_404(GeneratedReport, report_id)
+        replacements = []
+        try:
+            buffer = _regenerate_archived_report_buffer(report)
+            payload = buffer.getvalue() if hasattr(buffer, "getvalue") else buffer.read()
+            old_name, new_name = _replace_archived_report_payload(report, payload)
+            replacements.append((old_name, new_name, report.id))
+            db.session.commit()
+        except (ValueError, OSError) as exc:
+            db.session.rollback()
+            _cleanup_report_replacements(replacements, committed=False)
+            flash(f"Impossibile rigenerare il report: {exc}", "error")
+            return redirect(request.referrer or url_for("reports", _anchor="archived-reports"))
+        except Exception:
+            db.session.rollback()
+            _cleanup_report_replacements(replacements, committed=False)
+            raise
+        _cleanup_report_replacements(replacements, committed=True)
+        audit("report_regenerated", "generated_report", report.id, report.report_type)
+        flash("Report rigenerato e sostituito.", "success")
+        return redirect(request.referrer or url_for("reports", _anchor="archived-reports"))
 
     @app.post("/reports/archive/<int:report_id>/delete")
     @login_required

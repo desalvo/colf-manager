@@ -2582,6 +2582,7 @@ def create_app(test_config=None):
                 Worker.query.order_by(Worker.last_name, Worker.first_name).all(),
                 Employer.query.order_by(Employer.last_name, Employer.first_name).all(),
                 year,
+                worker_signatures={w.id: _signature_path(w) for w in Worker.query.all()},
             )
 
         if worker is None or year is None:
@@ -2913,6 +2914,7 @@ def create_app(test_config=None):
             PAYMENT_LABELS.get(payment.payment_type, payment.payment_type),
             PAYMENT_METHOD_LABELS.get(payment.payment_method, payment.payment_method),
             _signature_path(employer),
+            worker_signature=_signature_path(worker),
         )
         audit(
             "payment_receipt_downloaded",
@@ -3166,8 +3168,27 @@ def create_app(test_config=None):
 
     def _rule_notes(year):
         verified = year in {2025, 2026}
-        prefix = f"Regole {year} verificate su fonti ufficiali INPS/Agenzia delle Entrate." if verified else f"Formula generale applicata per {year}; verificare eventuali variazioni annuali su INPS, Ministero del Lavoro e Agenzia delle Entrate prima dell'uso ufficiale."
-        return [prefix, "Ferie: 26 giorni lavorativi annui; per servizio inferiore all'anno maturano in dodicesimi e la frazione di mese pari o superiore a 15 giorni vale come mese intero (fonte: INPS, Calcolare contributi, tredicesima e ferie per i lavoratori domestici).", "TFR (rapporti dal 1990): quota dell'anno = retribuzione utile / 13,5. La quota dell'anno corrente non è rivalutata (fonte: INPS, Dimissioni, licenziamento e TFR dei lavoratori domestici; art. 2120 c.c.).", "Quote TFR di anni precedenti: rivalutazione legale 1,5% + 75% dell'incremento dell'indice FOI ISTAT dicembre/dicembre.", "Tredicesima: un dodicesimo della retribuzione annua; nel prospetto viene inclusa come quota maturata stimata nella base utile TFR (fonte: INPS).", "CU di cortesia: il PDF è una certificazione del datore privato non sostituto d'imposta e non il modello CU telematico (fonte: Agenzia delle Entrate, istruzioni dichiarazione precompilata)."]
+        prefix = (
+            f"Regole {year} verificate su fonti ufficiali/contrattuali disponibili."
+            if verified
+            else f"Formula generale applicata per {year}; verificare contratto collettivo, tabelle INPS, minimi e normativa vigenti nel periodo prima dell'uso ufficiale."
+        )
+        period_note = (
+            "Dal 1 novembre 2025 si applica il CCNL lavoro domestico sottoscritto il 28 ottobre 2025; per i periodi precedenti resta necessario applicare il CCNL e i parametri allora vigenti."
+            if year == 2025
+            else "CCNL lavoro domestico 28 ottobre 2025, in vigore dal 1 novembre 2025 al 31 ottobre 2028."
+            if year >= 2026
+            else "Per questo anno va applicato il CCNL vigente nel relativo periodo, senza applicare retroattivamente il rinnovo 2025."
+        )
+        return [
+            prefix,
+            period_note,
+            "Ferie: 26 giorni lavorativi annui; riferimento CCNL vigente (nel CCNL 2025: art. 17) e guida INPS sul calcolo di contributi, tredicesima e ferie.",
+            "Tredicesima: maturazione in dodicesimi secondo il CCNL vigente (nel CCNL 2025: art. 39) e indicazioni INPS; per i rapporti inferiori all'anno rilevano i mesi utili del rapporto.",
+            "TFR: retribuzione utile / 13,5; riferimenti art. 2120 c.c., legge 29 maggio 1982 n. 297 e CCNL vigente (nel CCNL 2025: art. 41). Le quote pregresse sono rivalutate secondo la disciplina applicabile, esclusa la quota dell'anno in corso.",
+            "Contributi: utilizzare tabelle e istruzioni INPS dell'anno di competenza, incluse le regole sulla retribuzione oraria effettiva e sulle eventuali componenti convenzionali.",
+            "CU di cortesia: il PDF è una certificazione gestionale del datore privato e non sostituisce eventuali certificazioni o dichiarazioni fiscali previste dalla normativa.",
+        ]
 
     def _fiscal_data(worker, summary, year):
         inps = inps_contribution_summary(worker, summary, year) if worker.inps_number else None
@@ -3666,7 +3687,10 @@ def create_app(test_config=None):
             None,
             "annual_payments",
             f"pagamenti-effettuati-{year}.pdf",
-            annual_payments_pdf(payments, workers, employers, year),
+            annual_payments_pdf(
+                payments, workers, employers, year,
+                worker_signatures={w.id: _signature_path(w) for w in workers},
+            ),
             date(year, 1, 1),
             date(year, 12, 31),
         )

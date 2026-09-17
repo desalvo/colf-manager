@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r99-full
+# colf-manager 1.0.0 · build r100-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -104,3 +104,7 @@ Ogni spesa crea una partita a credito del datore o del lavoratore. È possibile 
 - Overview con icona su ogni indicatore e stato cromatico per gli indicatori soggetti a limite.
 
 - r99: i report archiviati possono essere rigenerati e sostituiti in-place tramite l'azione grafica ↻, mantenendo lo stesso record di archivio.
+
+### PDF report - impaginazione e note finali
+
+I report PDF mantengono titolo di sezione e contenuto sulla stessa pagina quando possibile, mostrano `Pagina X di Y` e terminano con note metodologiche/legali/privacy in corpo ridotto, seguite da luogo, data e firma del lavoratore. Se la firma del lavoratore è stata caricata, viene inserita automaticamente.

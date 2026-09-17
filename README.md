@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r99-full
+# colf-manager 1.0.0 · build r100-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -124,3 +124,7 @@ Each expense creates a balance owed either to the employer or to the worker. Mul
 Report annuale complessivo dei pagamenti effettuati, totali pagati per categoria, annullamento regolamento spese da cedolino e firme PDF con fondo bianco trasparente.
 
 - r99: archived reports can be regenerated and replaced in place using the graphical ↻ action while preserving the same archive record.
+
+### PDF reports - layout and final notes
+
+PDF reports keep section headings with their related content on the same page whenever possible, show `Page X of Y`/`Pagina X di Y`, and end with compact calculation/legal/privacy notes followed by place, date and worker signature. An uploaded worker signature is inserted automatically.

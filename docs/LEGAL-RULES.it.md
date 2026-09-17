@@ -36,3 +36,8 @@ La tredicesima del lavoro domestico è calcolata come un dodicesimo della retrib
 Per il 2025 sono usate le tabelle INPS della circolare n. 29/2025; per il 2026 le fasce e gli importi derivano dalla circolare INPS n. 9/2026. Per i contratti a termine viene considerato anche il contributo addizionale dell'1,4%, salvo casi di sostituzione che devono essere verificati.
 
 Il datore domestico privato non è normalmente sostituto d'imposta. L'IRPEF mostrata è quindi una stima della sola imposta lorda nazionale sul reddito del rapporto registrato, non una liquidazione definitiva: altri redditi, deduzioni, detrazioni, crediti e addizionali regionali/comunali possono cambiare radicalmente l'imposta effettiva.
+
+
+## Aggiornamento r100 - note nei report PDF
+
+Dal build r100 i report PDF riportano in fondo, con testo ridotto, note metodologiche, riferimenti legali/contrattuali e un richiamo alla riservatezza dei dati personali. Per i periodi dal 1 novembre 2025 il riferimento contrattuale è il CCNL lavoro domestico sottoscritto il 28 ottobre 2025 (tra cui art. 17 ferie, art. 39 tredicesima, art. 41 TFR). Per il TFR restano richiamati art. 2120 c.c. e legge 29 maggio 1982 n. 297. Per i contributi devono essere usate le tabelle INPS dell'anno di competenza. La nota privacy richiama il Regolamento (UE) 2016/679 e non sostituisce l'informativa eventualmente dovuta all'interessato.

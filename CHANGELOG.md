@@ -1,6 +1,17 @@
 # Changelog
 
 
+## r100-full - report PDF layout, page totals, legal/privacy notes and signatures
+
+- Keep report section headings with their related content on the same PDF page whenever the section fits; oversized sections may flow naturally across pages.
+- Footer pagination now shows `Pagina X di Y` on every page.
+- Add compact final notes to every report for calculation method, applicable legal/contractual references, and personal-data confidentiality.
+- Legal notes distinguish the CCNL applicable by report period; for periods from 1 November 2025 they reference the CCNL signed 28 October 2025, including art. 17 (ferie), art. 39 (tredicesima), art. 41 (TFR), plus art. 2120 c.c., Law 297/1982 and annual INPS instructions where relevant.
+- Place, report date and worker signature are always present at the end of worker reports; an uploaded worker signature is inserted automatically. Employer signature remains available when requested.
+- Annual payments report supports one signature block per worker represented in the report.
+- Calculation/legal/privacy material is rendered as smaller note text rather than normal report-body sections.
+- Fixed signature-area structure so both stored signatures and empty signature placeholders are centred through the same nested-table layout, preserving deterministic ReportLab alignment and regression compatibility.
+
 ## r99-full - archived report regeneration
 
 - Added a graphical **Rigenera** (↻) action to each archived report, with accessible text hint and confirmation.

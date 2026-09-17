@@ -2347,3 +2347,37 @@ def test_archived_report_can_be_regenerated_in_place(app, client):
         assert not old_path.exists()
         assert report.size_bytes > 0
         assert len(report.sha256) == 64
+
+
+def test_pdf_reports_have_total_pages_notes_and_worker_signature(app, client):
+    from pypdf import PdfReader
+
+    worker_id = make_worker(app)
+    with app.app_context():
+        db.session.add(HourlyRate(worker_id=worker_id, valid_from=date(2026, 1, 1), amount=10))
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 1, 5),
+                start_time=time(9),
+                end_time=time(11),
+                break_minutes=0,
+                location="Casa",
+            )
+        )
+        db.session.commit()
+    login(client)
+    response = client.get(f"/reports/payroll.pdf?worker_id={worker_id}&year=2026&month=1")
+    assert response.status_code == 200
+    reader = PdfReader(BytesIO(response.data))
+    assert len(reader.pages) >= 1
+    all_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    assert "Note metodologiche, legali e privacy" in all_text
+    assert "Metodo di calcolo." in all_text
+    assert "Riferimenti e termini legali." in all_text
+    assert "Dati personali." in all_text
+    assert "Luogo, data e firma" in all_text
+    assert "Firma lavoratore" in all_text
+    total = len(reader.pages)
+    for number, page in enumerate(reader.pages, 1):
+        assert f"Pagina {number} di {total}" in (page.extract_text() or "")

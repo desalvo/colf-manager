@@ -35,6 +35,13 @@
       </label>
       <p class="fineprint">Numero massimo di combinazioni trascinabili mostrate sulla destra del calendario, ordinate dalle più utilizzate alle meno utilizzate.</p>
 
+      <h3>Audit</h3>
+      <label>Retention audit (mesi)
+        <input type="number" min="0" max="120" name="audit_retention_months" value="{{ settings.audit_retention_months }}">
+      </label>
+      <p class="fineprint">Default 12 mesi. Imposta 0 per conservare lo storico senza cancellazione automatica. La pulizia automatica viene verificata periodicamente.</p>
+      <p><a class="button secondary" href="{{ url_for('audit_log_view') }}">Apri registro audit</a></p>
+
       <h3>Autenticazione</h3>
       <label>Metodo attivo
         <select name="auth_methods" disabled><option selected>Password locale</option></select>

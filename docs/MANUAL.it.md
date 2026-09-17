@@ -171,3 +171,6 @@ Se è caricata una firma grafica del lavoratore o del datore, i PDF eliminano il
 
 ### Imputazione economica delle ferie su più mesi
 Per un periodo continuativo che attraversa più mesi, se nel mese iniziale ricadono **massimo 3 giorni di ferie computabili**, l’intera retribuzione ferie è imputata al mese di fine periodo e il riporto è indicato nell’app e nel cedolino. Se nel mese iniziale ricadono **4 o più giorni**, ogni giorno di ferie è imputato economicamente al proprio mese.
+
+## Registro Audit
+La voce **Audit**, disponibile agli amministratori, permette di consultare le operazioni registrate dall'applicazione. Sono disponibili ricerca testuale, filtro per data e paginazione. In **Impostazioni → Audit** si configura la retention automatica (12 mesi per default; 0 per disabilitarla). La pulizia manuale può eliminare i record più vecchi di una soglia in giorni oppure conservare soltanto gli ultimi N record. Le operazioni di pulizia manuale vengono registrate nel nuovo storico risultante.

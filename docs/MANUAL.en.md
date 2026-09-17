@@ -176,3 +176,6 @@ For one continuous vacation period spanning multiple months, if the starting mon
 ### Calendar navigation and quick choices
 
 Use the Day, Month and Year controls to jump directly to a specific date while keeping the current calendar view. Drag-and-drop quick choices are ordered by usage frequency, with the most recent use breaking ties. Permit shortcuts also preserve the permit category.
+
+## Audit log
+The administrator-only **Audit** page shows application audit operations with text search, date filtering and pagination. **Settings → Audit** controls automatic retention (12 months by default; 0 disables it). Manual cleanup can remove records older than a number of days or keep only the latest N records. Manual cleanup actions are recorded in the resulting audit trail.

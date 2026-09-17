@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r101-full
+# colf-manager 1.0.0 · build r102-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -108,3 +108,6 @@ Ogni spesa crea una partita a credito del datore o del lavoratore. È possibile 
 ### PDF report - impaginazione e note finali
 
 I report PDF mantengono titolo di sezione e contenuto sulla stessa pagina quando possibile, mostrano `Pagina X di Y` e terminano con note metodologiche/legali/privacy in corpo ridotto, seguite da luogo, data e firma del lavoratore. Se la firma del lavoratore è stata caricata, viene inserita automaticamente.
+
+### Audit operativo
+Gli amministratori dispongono di un registro Audit consultabile da **Audit** nel menu. Il registro conserva data/ora, utente, azione, oggetto, indirizzo client e dettagli. La ricerca opera sull'intero archivio per testo e intervallo di date. La retention automatica è configurabile in **Impostazioni → Audit** ed è pari a 12 mesi per default; il valore `0` disabilita la cancellazione automatica. Dalla pagina Audit è inoltre possibile eliminare manualmente i record più vecchi di un numero di giorni oppure mantenere soltanto gli ultimi N record. I purge manuali sono a loro volta registrati.

@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r101-full
+# colf-manager 1.0.0 · build r102-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -128,3 +128,6 @@ Report annuale complessivo dei pagamenti effettuati, totali pagati per categoria
 ### PDF reports - layout and final notes
 
 PDF reports keep section headings with their related content on the same page whenever possible, show `Page X of Y`/`Pagina X di Y`, and end with compact calculation/legal/privacy notes followed by place, date and worker signature. An uploaded worker signature is inserted automatically.
+
+### Operational audit
+Administrators can use the **Audit** menu to inspect the application audit trail. Entries retain timestamp, user, action, object, client address and details. Search covers the whole archive by free text and date range. Automatic retention is configurable under **Settings → Audit** and defaults to 12 months; `0` disables automatic deletion. The Audit page can also purge records older than a chosen number of days or keep only the latest N records. Manual purge actions are themselves audited.

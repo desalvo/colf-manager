@@ -32,6 +32,7 @@
       <a href="/payments" title="Pagamenti"><span class="nav-icon">✓</span><span class="nav-label">Pagamenti</span></a>
       <a href="/mail/compose" title="Invia comunicazione"><span class="nav-icon">✉</span><span class="nav-label">Invia e-mail</span></a>
       {% if current_user.is_admin %}
+      <a href="/admin/audit" title="Audit"><span class="nav-icon">◎</span><span class="nav-label">Audit</span></a>
       <a href="/admin/users" title="Utenti"><span class="nav-icon">♟</span><span class="nav-label">Utenti</span></a>
       <a href="/admin/archive" title="Import / Export"><span class="nav-icon">⇅</span><span class="nav-label">Import / Export</span></a>
       {% endif %}

@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Amministrazione · tracciabilità</span><h1>Audit operazioni</h1><p>Consulta le operazioni applicative, cerca nell'intero storico e applica la retention.</p></div>
+<section class="card">
+  <div class="card-title"><div><h2>Ricerca</h2><p class="fineprint">{{ total }} record trovati · retention automatica: {% if retention_months %}{{ retention_months }} mesi{% else %}disabilitata{% endif %}</p></div></div>
+  <form method="get" class="formgrid">
+    <label>Testo<input type="search" name="q" value="{{ q }}" placeholder="Utente, azione, oggetto, IP, dettagli…"></label>
+    <label>Dal<input type="date" name="date_from" value="{{ date_from }}"></label>
+    <label>Al<input type="date" name="date_to" value="{{ date_to }}"></label>
+    <div class="form-actions"><button>Cerca</button><a class="button secondary" href="{{ url_for('audit_log_view') }}">Azzera</a></div>
+  </form>
+</section>
+<section class="card">
+  <div class="table-scroll"><table class="audit-table"><thead><tr><th>Data/ora</th><th>Utente</th><th>Azione</th><th>Oggetto</th><th>IP</th><th>Dettagli</th></tr></thead><tbody>
+  {% for row in rows %}<tr><td>{{ row.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</td><td>{{ users.get(row.user_id, '—') }}</td><td><b>{{ row.action }}</b></td><td>{{ row.object_type or '—' }}{% if row.object_id %} #{{ row.object_id }}{% endif %}</td><td>{{ row.remote_addr or '—' }}</td><td>{{ row.details or '—' }}</td></tr>{% else %}<tr><td colspan="6">Nessuna operazione audit corrisponde ai filtri.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if pages > 1 %}<nav class="pagination" aria-label="Paginazione audit">{% if prev_url %}<a class="button secondary" href="{{ prev_url }}">← Precedente</a>{% endif %}<span>Pagina {{ page }} di {{ pages }}</span>{% if next_url %}<a class="button secondary" href="{{ next_url }}">Successiva →</a>{% endif %}</nav>{% endif %}
+</section>
+<section class="card danger-zone"><h2>Ripulisci storico audit</h2><p class="fineprint">La cancellazione è definitiva. L'operazione di purge viene a sua volta registrata nell'audit.</p>
+  <div class="audit-purge-grid">
+    <form method="post" action="{{ url_for('audit_log_purge') }}" onsubmit="return confirm('Eliminare definitivamente i record audit più vecchi della soglia indicata?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="mode" value="age"><label>Elimina record più vecchi di (giorni)<input type="number" name="older_than_days" min="1" max="3650" value="365" required></label><button class="danger">Elimina per età</button></form>
+    <form method="post" action="{{ url_for('audit_log_purge') }}" onsubmit="return confirm('Mantenere solo il numero di record indicato, eliminando i più vecchi?')"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="mode" value="count"><label>Mantieni solo gli ultimi N record<input type="number" name="keep_records" min="0" max="1000000" value="10000" required></label><button class="danger">Riduci per numero</button></form>
+  </div>
+</section>
+{% endblock %}

@@ -17,6 +17,7 @@ from colf_manager.calculations import (
 )
 from colf_manager.models import (
     Absence,
+    AuditLog,
     Document,
     Employer,
     Expense,
@@ -2398,3 +2399,68 @@ def test_report_table_cells_wrap_long_unbroken_text_within_column():
     assert width <= 20 * mm
     assert height > cell.style.leading
     assert cell.style.wordWrap == "CJK"
+
+
+def test_audit_console_default_retention_search_and_manual_purge(app, client):
+    from datetime import timedelta
+    login(client)
+    with app.app_context():
+        now = datetime.utcnow()
+        db.session.add_all([
+            AuditLog(created_at=now - timedelta(days=500), action="legacy_action", object_type="worker", object_id="1", details="old marker"),
+            AuditLog(created_at=now - timedelta(days=20), action="recent_action", object_type="payment", object_id="2", details="needle current"),
+            AuditLog(created_at=now - timedelta(days=10), action="another_action", object_type="payment", object_id="3", details="other"),
+        ])
+        db.session.commit()
+
+    response = client.get("/admin/audit?q=needle")
+    assert response.status_code == 200
+    assert b"recent_action" in response.data
+    assert b"legacy_action" not in response.data
+    assert b"12 mesi" in response.data
+
+    response = client.post("/admin/audit/purge", data={"mode": "age", "older_than_days": "365"})
+    assert response.status_code == 302
+    with app.app_context():
+        assert AuditLog.query.filter_by(action="legacy_action").count() == 0
+        assert AuditLog.query.filter_by(action="audit_manual_purge").count() >= 1
+
+
+def test_audit_manual_purge_can_keep_last_n_records(app, client):
+    login(client)
+    with app.app_context():
+        AuditLog.query.delete()
+        base = datetime.utcnow()
+        for idx in range(7):
+            db.session.add(AuditLog(created_at=base.replace(microsecond=idx), action=f"bulk_{idx}"))
+        db.session.commit()
+    response = client.post("/admin/audit/purge", data={"mode": "count", "keep_records": "3"})
+    assert response.status_code == 302
+    with app.app_context():
+        # Three retained business records plus the audit entry for the purge itself.
+        assert AuditLog.query.filter(AuditLog.action.like("bulk_%")).count() == 3
+        assert AuditLog.query.filter_by(action="audit_manual_purge").count() == 1
+
+
+def test_audit_retention_setting_can_be_changed_or_disabled(app, client):
+    login(client)
+    response = client.post(
+        "/settings",
+        data={
+            "action": "save_settings",
+            "calendar_recent_limit": "10",
+            "audit_retention_months": "0",
+            "external_url": "",
+            "smtp_host": "",
+            "smtp_port": "587",
+            "smtp_security": "starttls",
+            "smtp_username": "",
+            "smtp_from_email": "",
+            "smtp_from_name": "colf-manager",
+        },
+    )
+    assert response.status_code == 302
+    with app.app_context():
+        assert db.session.get(Setting, "audit_retention_months").value == "0"
+    response = client.get("/admin/audit")
+    assert b"disabilitata" in response.data

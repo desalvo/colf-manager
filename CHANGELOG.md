@@ -1,6 +1,12 @@
 # Changelog
 
+## r102-full — Audit operativo e retention configurabile
 
+- Registro audit amministrativo con ricerca per testo e intervallo di date.
+- Retention automatica configurabile dalle impostazioni, default 12 mesi; 0 disabilita il purge automatico.
+- Pagina Audit con 50 record per pagina, utente, azione, oggetto, IP e dettagli.
+- Purge manuale per età dei record o mantenimento degli ultimi N record; il purge manuale viene a sua volta auditato.
+- Riutilizzo ed estensione dell'AuditLog già esistente, senza perdita dello storico precedente.
 
 ## r101-full - robust PDF table wrapping
 

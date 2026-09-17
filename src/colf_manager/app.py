@@ -32,8 +32,9 @@ from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user, login_required, login_user, logout_user
 from flask_migrate import Migrate
 from flask_wtf.csrf import CSRFProtect
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from dateutil.relativedelta import relativedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -597,6 +598,34 @@ def create_app(test_config=None):
             db.session.commit()
         except SQLAlchemyError:
             db.session.rollback()
+
+    def _audit_retention_months():
+        try:
+            return max(0, min(120, int(_setting("audit_retention_months", "12") or 12)))
+        except (TypeError, ValueError):
+            return 12
+
+    def _purge_audit_older_than(cutoff):
+        deleted = AuditLog.query.filter(AuditLog.created_at < cutoff).delete(synchronize_session=False)
+        db.session.commit()
+        return int(deleted or 0)
+
+    @app.before_request
+    def audit_retention_housekeeping():
+        # At most once per hour per process; 0 months explicitly disables automatic purge.
+        now = datetime.now(UTC).replace(tzinfo=None)
+        last = app.extensions.get("audit_retention_last_run")
+        if last and now - last < timedelta(hours=1):
+            return None
+        app.extensions["audit_retention_last_run"] = now
+        months = _audit_retention_months()
+        if months <= 0:
+            return None
+        try:
+            _purge_audit_older_than(now - relativedelta(months=months))
+        except SQLAlchemyError:
+            db.session.rollback()
+        return None
 
     def admin_required(view):
         @wraps(view)
@@ -4237,6 +4266,76 @@ def create_app(test_config=None):
     def calendar_subscription_caldav_ics(kind, object_id, token):
         return calendar_subscription_ics(kind, object_id, token)
 
+    @app.get("/admin/audit")
+    @admin_required
+    def audit_log_view():
+        q = (request.args.get("q") or "").strip()[:200]
+        date_from_raw = (request.args.get("date_from") or "").strip()
+        date_to_raw = (request.args.get("date_to") or "").strip()
+        page = max(1, request.args.get("page", default=1, type=int) or 1)
+        per_page = 50
+        query = AuditLog.query.outerjoin(User, AuditLog.user_id == User.id)
+        if date_from_raw:
+            try:
+                query = query.filter(AuditLog.created_at >= datetime.combine(date.fromisoformat(date_from_raw), time.min))
+            except ValueError:
+                flash("Data iniziale non valida", "error")
+        if date_to_raw:
+            try:
+                query = query.filter(AuditLog.created_at <= datetime.combine(date.fromisoformat(date_to_raw), time.max))
+            except ValueError:
+                flash("Data finale non valida", "error")
+        if q:
+            pattern = f"%{q}%"
+            query = query.filter(or_(
+                AuditLog.action.ilike(pattern),
+                AuditLog.object_type.ilike(pattern),
+                AuditLog.object_id.ilike(pattern),
+                AuditLog.remote_addr.ilike(pattern),
+                AuditLog.details.ilike(pattern),
+                User.username.ilike(pattern),
+            ))
+        total = query.count()
+        pages = max(1, (total + per_page - 1) // per_page)
+        page = min(page, pages)
+        rows = query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).offset((page - 1) * per_page).limit(per_page).all()
+        users = {u.id: u.username for u in User.query.filter(User.id.in_({r.user_id for r in rows if r.user_id})).all()} if rows else {}
+        common = {"q": q, "date_from": date_from_raw, "date_to": date_to_raw}
+        prev_url = url_for("audit_log_view", page=page-1, **common) if page > 1 else None
+        next_url = url_for("audit_log_view", page=page+1, **common) if page < pages else None
+        return render_template(
+            "audit.html", rows=rows, users=users, q=q, date_from=date_from_raw, date_to=date_to_raw,
+            total=total, page=page, pages=pages, prev_url=prev_url, next_url=next_url,
+            retention_months=_audit_retention_months(),
+        )
+
+    @app.post("/admin/audit/purge")
+    @admin_required
+    def audit_log_purge():
+        mode = request.form.get("mode", "age")
+        try:
+            if mode == "age":
+                days = max(1, min(3650, int(request.form.get("older_than_days", "365"))))
+                cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+                deleted = _purge_audit_older_than(cutoff)
+                detail = f"older_than_days={days}; deleted={deleted}"
+            elif mode == "count":
+                keep = max(0, min(1_000_000, int(request.form.get("keep_records", "10000"))))
+                ids = [row.id for row in AuditLog.query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).offset(keep).all()]
+                deleted = 0
+                if ids:
+                    deleted = AuditLog.query.filter(AuditLog.id.in_(ids)).delete(synchronize_session=False)
+                    db.session.commit()
+                detail = f"keep_records={keep}; deleted={int(deleted or 0)}"
+            else:
+                raise ValueError("Modalità di cancellazione non valida")
+            audit("audit_manual_purge", "audit_log", details=detail)
+            flash(f"Storico audit ripulito: {int(deleted or 0)} record eliminati", "success")
+        except (ValueError, TypeError, SQLAlchemyError) as exc:
+            db.session.rollback()
+            flash(f"Impossibile ripulire lo storico audit: {exc}", "error")
+        return redirect(url_for("audit_log_view"))
+
     @app.route("/settings", methods=["GET", "POST"])
     @login_required
     def settings():
@@ -4251,6 +4350,7 @@ def create_app(test_config=None):
             "smtp_from_name",
             "auth_methods",
             "external_url",
+            "audit_retention_months",
         ]
         selected_kind = request.args.get("calendar_kind", "worker")
         selected_id = request.args.get("calendar_id", type=int)
@@ -4313,6 +4413,8 @@ def create_app(test_config=None):
                     1, min(50, int(request.form.get("calendar_recent_limit", "10")))
                 )
                 _save_setting("calendar_recent_limit", recent_limit)
+                audit_retention_months = max(0, min(120, int(request.form.get("audit_retention_months", "12") or 12)))
+                _save_setting("audit_retention_months", audit_retention_months)
                 external_url = request.form.get("external_url", "").strip().rstrip("/")
                 if external_url:
                     parsed = urlsplit(external_url)
@@ -4343,6 +4445,7 @@ def create_app(test_config=None):
 
         values = {key: _setting(key, "") for key in admin_keys}
         values["calendar_recent_limit"] = values["calendar_recent_limit"] or "10"
+        values["audit_retention_months"] = values["audit_retention_months"] or "12"
         values["smtp_port"] = values["smtp_port"] or "587"
         values["smtp_security"] = values["smtp_security"] or "starttls"
         values["smtp_from_name"] = values["smtp_from_name"] or "colf-manager"

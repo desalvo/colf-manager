@@ -1,5 +1,11 @@
 # Changelog
 
+## r103-full — Calendario mobile e statistiche
+
+- Corrette le viste mobile settimanale e giornaliera del calendario: toolbar sempre visibile e centrata, con scorrimento orizzontale limitato alla sola griglia oraria.
+- Aggiunta la voce di menu “Statistiche”.
+- Nuova pagina Statistiche con filtro annuale, KPI, grafici su ore/pagamenti/lavoratori per datore e tabelle di dettaglio per lavoratori e datori di lavoro.
+
 ## r102-full — Audit operativo e retention configurabile
 
 - Registro audit amministrativo con ricerca per testo e intervallo di date.

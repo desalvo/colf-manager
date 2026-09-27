@@ -603,7 +603,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
   #calendar .fc{display:block!important;width:100%!important;min-width:100%!important;min-height:520px!important}
   #calendar .fc-view-harness{display:block!important;min-height:440px!important;visibility:visible!important}
   #calendar .fc-view-harness-active>.fc-view{visibility:visible!important}
-  #calendar.timegrid-active{width:680px!important;min-width:680px!important;max-width:none!important}
+  #calendar.timegrid-active{width:100%!important;min-width:0!important;max-width:100%!important}
   #calendar:not(.timegrid-active){width:100%!important;min-width:100%!important;max-width:100%!important}
   #calendar:not(.timegrid-active) .fc-dayGridMonth-view,
   #calendar:not(.timegrid-active) .fc-scrollgrid{width:100%!important;min-width:0!important;max-width:100%!important}
@@ -612,7 +612,7 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
   #calendar{min-height:500px!important}
   #calendar .fc{min-height:500px!important}
   #calendar .fc-view-harness{min-height:420px!important}
-  #calendar.timegrid-active{width:640px!important;min-width:640px!important}
+  #calendar.timegrid-active{width:100%!important;min-width:0!important;max-width:100%!important}
 }
 
 /* r55 reports, payments and signatures */
@@ -676,3 +676,27 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 @media(max-width:850px){.payment-history-search{grid-template-columns:1fr}.compact-payment-totals article{padding:9px 11px}.compact-payment-totals strong{font-size:20px}}
 /* r102 audit console */
 .audit-table td,.audit-table th{vertical-align:top}.audit-table td:last-child{min-width:240px;overflow-wrap:anywhere}.audit-purge-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.audit-purge-grid form{padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--soft)}@media(max-width:850px){.audit-purge-grid{grid-template-columns:1fr}}
+
+
+/* r103: mobile time-grid visibility and centred calendar controls */
+@media(max-width:850px){
+  #calendar.timegrid-active,#calendar.timegrid-active .fc{width:100%!important;min-width:0!important;max-width:100%!important}
+  #calendar.timegrid-active .fc-header-toolbar{width:100%!important;max-width:100%!important;margin-left:auto!important;margin-right:auto!important}
+  #calendar.timegrid-active .fc-toolbar-chunk{max-width:100%!important;justify-content:center!important}
+  #calendar.timegrid-active .fc-view-harness{width:100%!important;max-width:100%!important;overflow-x:auto!important;overflow-y:hidden!important;-webkit-overflow-scrolling:touch}
+  #calendar.timegrid-active .fc-timeGrid-view{min-width:620px!important;width:620px!important}
+  #calendar .fc-header-toolbar .fc-button-group{display:flex!important;flex-wrap:wrap!important;justify-content:center!important}
+}
+@media(max-width:520px){
+  #calendar.timegrid-active .fc-timeGrid-view{min-width:600px!important;width:600px!important}
+}
+
+/* r103 statistics */
+.statistics-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:20px}
+.statistics-kpis article{background:var(--paper);border:1px solid var(--line,#dce5e0);border-radius:14px;padding:16px;display:grid;gap:3px}
+.statistics-kpis small{color:var(--muted);font-weight:700}.statistics-kpis strong{font:700 27px Georgia,serif;color:var(--ink)}
+.statistics-charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.statistics-chart{min-width:0}.statistics-chart canvas{width:100%!important;max-height:330px}
+.statistics-filter{display:flex;align-items:end;gap:10px;flex-wrap:wrap}.statistics-filter label{margin:0;min-width:130px}.statistics-filter .button{min-height:42px}
+.statistics-table td,.statistics-table th{white-space:normal;overflow-wrap:anywhere}
+@media(max-width:1000px){.statistics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.statistics-charts{grid-template-columns:1fr}}
+@media(max-width:520px){.statistics-kpis{grid-template-columns:1fr 1fr;gap:8px}.statistics-kpis article{padding:12px}.statistics-kpis strong{font-size:20px}.statistics-filter{display:grid;grid-template-columns:1fr;width:100%}.statistics-filter label,.statistics-filter button{width:100%}}

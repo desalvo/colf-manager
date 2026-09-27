@@ -944,6 +944,130 @@ def create_app(test_config=None):
         worker.notes = (request.form.get("notes") or "").strip() or None
         return worker
 
+    @app.get("/statistics")
+    @login_required
+    def statistics():
+        today = date.today()
+        year = request.args.get("year", today.year, type=int)
+        if year < 1990 or year > 2200:
+            year = today.year
+            flash("Anno non valido: ripristinato l'anno corrente", "error")
+
+        year_start = date(year, 1, 1)
+        year_end = date(year, 12, 31)
+        workers = Worker.query.order_by(Worker.last_name, Worker.first_name).all()
+        employers = Employer.query.order_by(Employer.last_name, Employer.first_name).all()
+        worker_map = {worker.id: worker for worker in workers}
+        employer_map = {employer.id: employer for employer in employers}
+
+        entries = WorkEntry.query.filter(WorkEntry.work_date.between(year_start, year_end)).all()
+        absences = Absence.query.filter(
+            Absence.start_date <= year_end,
+            Absence.end_date >= year_start,
+        ).all()
+        payments = Payment.query.filter(Payment.status == "paid").all()
+
+        worker_stats = {
+            worker.id: {
+                "name": f"{worker.first_name} {worker.last_name}",
+                "employer": (
+                    f"{employer_map[worker.employer_id].first_name} {employer_map[worker.employer_id].last_name}"
+                    if worker.employer_id in employer_map else "—"
+                ),
+                "hours": 0.0,
+                "overtime_hours": 0.0,
+                "absence_days": 0,
+                "paid_amount": 0.0,
+            }
+            for worker in workers
+        }
+        employer_stats = {
+            employer.id: {
+                "name": f"{employer.first_name} {employer.last_name}",
+                "worker_count": 0,
+                "hours": 0.0,
+                "paid_amount": 0.0,
+            }
+            for employer in employers
+        }
+        month_hours = [0.0] * 12
+
+        for worker in workers:
+            if worker.employer_id in employer_stats:
+                employer_stats[worker.employer_id]["worker_count"] += 1
+
+        for entry in entries:
+            hours = float(entry.hours)
+            row = worker_stats.get(entry.worker_id)
+            if row is not None:
+                row["hours"] += hours
+                if entry.entry_kind == "overtime":
+                    row["overtime_hours"] += hours
+            worker = worker_map.get(entry.worker_id)
+            if worker and worker.employer_id in employer_stats:
+                employer_stats[worker.employer_id]["hours"] += hours
+            month_hours[entry.work_date.month - 1] += hours
+
+        for absence in absences:
+            overlap_start = max(absence.start_date, year_start)
+            overlap_end = min(absence.end_date, year_end)
+            if overlap_start <= overlap_end and absence.worker_id in worker_stats:
+                worker_stats[absence.worker_id]["absence_days"] += (overlap_end - overlap_start).days + 1
+
+        paid_count = 0
+        paid_amount = 0.0
+        for payment in payments:
+            reference_date = payment.payment_date or payment.period_start
+            if reference_date is None:
+                reference_date = payment.created_at.date() if payment.created_at else None
+            if reference_date is None or reference_date.year != year:
+                continue
+            amount = float(payment.amount or 0)
+            paid_count += 1
+            paid_amount += amount
+            if payment.worker_id in worker_stats:
+                worker_stats[payment.worker_id]["paid_amount"] += amount
+            employer_id = payment.employer_id
+            if employer_id is None:
+                worker = worker_map.get(payment.worker_id)
+                employer_id = worker.employer_id if worker else None
+            if employer_id in employer_stats:
+                employer_stats[employer_id]["paid_amount"] += amount
+
+        worker_rows = sorted(worker_stats.values(), key=lambda row: (-row["hours"], row["name"].lower()))
+        employer_rows = sorted(employer_stats.values(), key=lambda row: (-row["hours"], row["name"].lower()))
+        active_workers = sum(
+            1 for worker in workers
+            if worker.employment_start <= today and (worker.employment_end is None or worker.employment_end >= today)
+        )
+        kpis = {
+            "workers": len(workers),
+            "active_workers": active_workers,
+            "employers": len(employers),
+            "employers_with_workers": sum(1 for row in employer_rows if row["worker_count"]),
+            "hours": sum(row["hours"] for row in worker_rows),
+            "overtime_hours": sum(row["overtime_hours"] for row in worker_rows),
+            "paid_count": paid_count,
+            "paid_amount": paid_amount,
+        }
+        chart_data = {
+            "worker_labels": [row["name"] for row in worker_rows],
+            "worker_hours": [round(row["hours"], 2) for row in worker_rows],
+            "worker_payments": [round(row["paid_amount"], 2) for row in worker_rows],
+            "employer_labels": [row["name"] for row in employer_rows],
+            "employer_workers": [row["worker_count"] for row in employer_rows],
+            "month_labels": ["Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"],
+            "month_hours": [round(value, 2) for value in month_hours],
+        }
+        return render_template(
+            "statistics.html",
+            year=year,
+            kpis=kpis,
+            worker_rows=worker_rows,
+            employer_rows=employer_rows,
+            chart_data=chart_data,
+        )
+
     @app.route("/workers", methods=["GET", "POST"])
     @login_required
     def workers():

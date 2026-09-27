@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+{% block title %}Statistiche · colf-manager{% endblock %}
+{% block head %}<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>{% endblock %}
+{% block content %}
+<div class="page-title"><span class="eyebrow">Analisi gestionale</span><h1>Statistiche</h1><p>Indicatori, tendenze e confronti su lavoratori e datori di lavoro.</p></div>
+<section class="card">
+  <form method="get" class="statistics-filter">
+    <label>Anno<input type="number" name="year" min="1990" max="2200" value="{{ year }}"></label>
+    <button type="submit">Aggiorna</button>
+  </form>
+</section>
+<div class="statistics-kpis">
+  <article><small>Lavoratori</small><strong>{{ kpis.workers }}</strong><span>{{ kpis.active_workers }} attivi</span></article>
+  <article><small>Datori di lavoro</small><strong>{{ kpis.employers }}</strong><span>{{ kpis.employers_with_workers }} con lavoratori</span></article>
+  <article><small>Ore lavorate {{ year }}</small><strong>{{ '%.2f'|format(kpis.hours)|replace('.', ',') }}</strong><span>di cui {{ '%.2f'|format(kpis.overtime_hours)|replace('.', ',') }} straordinarie</span></article>
+  <article><small>Pagamenti effettuati {{ year }}</small><strong>{{ kpis.paid_amount|money }}</strong><span>{{ kpis.paid_count }} pagamenti</span></article>
+</div>
+<div class="statistics-charts">
+  <section class="card statistics-chart"><div class="card-title"><div><h2>Ore per lavoratore</h2><p class="fineprint">Ore registrate nell'anno selezionato.</p></div></div><canvas id="hoursWorkerChart" aria-label="Ore per lavoratore"></canvas></section>
+  <section class="card statistics-chart"><div class="card-title"><div><h2>Pagamenti per lavoratore</h2><p class="fineprint">Importi con stato pagato nell'anno selezionato.</p></div></div><canvas id="paymentsWorkerChart" aria-label="Pagamenti per lavoratore"></canvas></section>
+  <section class="card statistics-chart"><div class="card-title"><div><h2>Lavoratori per datore</h2><p class="fineprint">Distribuzione dell'anagrafica corrente.</p></div></div><canvas id="workersEmployerChart" aria-label="Lavoratori per datore"></canvas></section>
+  <section class="card statistics-chart"><div class="card-title"><div><h2>Ore mensili</h2><p class="fineprint">Andamento delle ore lavorate nell'anno.</p></div></div><canvas id="monthlyHoursChart" aria-label="Ore mensili"></canvas></section>
+</div>
+<section class="card"><div class="card-title"><div><h2>Dettaglio lavoratori</h2><p class="fineprint">Ore, assenze e pagamenti nell'anno {{ year }}.</p></div></div><div class="table-scroll"><table class="statistics-table"><thead><tr><th>Lavoratore</th><th>Datore</th><th>Ore</th><th>Straord.</th><th>Giorni assenza</th><th>Pagato</th></tr></thead><tbody>{% for row in worker_rows %}<tr><td>{{ row.name }}</td><td>{{ row.employer }}</td><td>{{ '%.2f'|format(row.hours)|replace('.', ',') }}</td><td>{{ '%.2f'|format(row.overtime_hours)|replace('.', ',') }}</td><td>{{ row.absence_days }}</td><td>{{ row.paid_amount|money }}</td></tr>{% else %}<tr><td colspan="6">Nessun lavoratore presente.</td></tr>{% endfor %}</tbody></table></div></section>
+<section class="card"><div class="card-title"><div><h2>Dettaglio datori di lavoro</h2><p class="fineprint">Lavoratori collegati, ore e pagamenti nell'anno {{ year }}.</p></div></div><div class="table-scroll"><table class="statistics-table"><thead><tr><th>Datore</th><th>Lavoratori</th><th>Ore</th><th>Pagato</th></tr></thead><tbody>{% for row in employer_rows %}<tr><td>{{ row.name }}</td><td>{{ row.worker_count }}</td><td>{{ '%.2f'|format(row.hours)|replace('.', ',') }}</td><td>{{ row.paid_amount|money }}</td></tr>{% else %}<tr><td colspan="4">Nessun datore di lavoro presente.</td></tr>{% endfor %}</tbody></table></div></section>
+<script>
+window.addEventListener('load', () => {
+  if (!window.Chart) return;
+  const data = {{ chart_data|tojson }};
+  const common = {responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}}};
+  new Chart(document.getElementById('hoursWorkerChart'), {type:'bar', data:{labels:data.worker_labels,datasets:[{label:'Ore',data:data.worker_hours}]}, options:common});
+  new Chart(document.getElementById('paymentsWorkerChart'), {type:'bar', data:{labels:data.worker_labels,datasets:[{label:'Euro',data:data.worker_payments}]}, options:common});
+  new Chart(document.getElementById('workersEmployerChart'), {type:'bar', data:{labels:data.employer_labels,datasets:[{label:'Lavoratori',data:data.employer_workers}]}, options:{...common,indexAxis:'y'}});
+  new Chart(document.getElementById('monthlyHoursChart'), {type:'line', data:{labels:data.month_labels,datasets:[{label:'Ore',data:data.month_hours,tension:.25,fill:false}]}, options:common});
+});
+</script>
+{% endblock %}

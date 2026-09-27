@@ -2464,3 +2464,62 @@ def test_audit_retention_setting_can_be_changed_or_disabled(app, client):
         assert db.session.get(Setting, "audit_retention_months").value == "0"
     response = client.get("/admin/audit")
     assert b"disabilitata" in response.data
+
+
+def test_mobile_calendar_timegrid_keeps_toolbar_visible_and_centered():
+    css = Path('src/colf_manager/static/style.css').read_text()
+    js = Path('src/colf_manager/static/calendar.js').read_text()
+    assert "timeGridWeek" in js and "timeGridDay" in js
+    assert "#calendar.timegrid-active{width:100%!important" in css
+    assert ".fc-header-toolbar{width:100%!important" in css
+    assert ".fc-timeGrid-view{min-width:620px!important" in css
+    assert "#calendar.timegrid-active{width:680px" not in css
+    assert "#calendar.timegrid-active{width:640px" not in css
+
+
+def test_statistics_page_shows_worker_and_employer_aggregates(app, client):
+    worker_id = make_worker(app)
+    with app.app_context():
+        worker = db.session.get(Worker, worker_id)
+        db.session.add(
+            WorkEntry(
+                worker_id=worker_id,
+                work_date=date(2026, 2, 3),
+                start_time=time(9),
+                end_time=time(12),
+                break_minutes=0,
+                location="Casa",
+                entry_kind="ordinary",
+            )
+        )
+        db.session.add(
+            Payment(
+                worker_id=worker_id,
+                employer_id=worker.employer_id,
+                payment_type="salary",
+                amount=Decimal("123.45"),
+                status="paid",
+                payment_method="bank_transfer",
+                payment_date=date(2026, 2, 28),
+                period_start=date(2026, 2, 1),
+                period_end=date(2026, 2, 28),
+            )
+        )
+        db.session.commit()
+    login(client)
+    response = client.get('/statistics?year=2026')
+    assert response.status_code == 200
+    assert b"Statistiche" in response.data
+    assert b"Ore per lavoratore" in response.data
+    assert b"Pagamenti per lavoratore" in response.data
+    assert b"Lavoratori per datore" in response.data
+    assert b"Dettaglio lavoratori" in response.data
+    assert b"123,45" in response.data
+
+
+def test_statistics_menu_entry_is_present(app, client):
+    login(client)
+    response = client.get('/')
+    assert response.status_code == 200
+    assert b'href="/statistics"' in response.data
+    assert b'>Statistiche<' in response.data

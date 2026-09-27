@@ -2523,3 +2523,40 @@ def test_statistics_menu_entry_is_present(app, client):
     assert response.status_code == 200
     assert b'href="/statistics"' in response.data
     assert b'>Statistiche<' in response.data
+
+
+def test_successful_login_clears_stale_unauthorized_flash_and_auth_state(app):
+    client = app.test_client()
+    # Visiting a protected page first queues Flask-Login's unauthorized flash.
+    response = client.get("/")
+    assert response.status_code == 302
+    with client.session_transaction() as sess:
+        assert sess.get("_flashes")
+        # Simulate stale state surviving a pod restart/expired session cycle.
+        sess["_id"] = "stale-client-identifier"
+        sess["_fresh"] = False
+
+    response = client.post(
+        "/login",
+        data={"username": "admin", "password": "Test-password-123"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Please log in to access this page." not in response.data
+    assert "Effettua il login per accedere a questa pagina.".encode("utf-8") not in response.data
+    with client.session_transaction() as sess:
+        assert sess.get("_user_id") is not None
+        assert sess.get("_fresh") is True
+        assert sess.permanent is True
+        assert not sess.get("_flashes")
+
+
+def test_mobile_calendar_timegrid_overrides_generic_mobile_table_layout():
+    css = Path('src/colf_manager/static/style.css').read_text()
+    js = Path('src/colf_manager/static/calendar.js').read_text()
+    assert "#calendar .fc table" in css
+    assert "display:table!important" in css
+    assert "white-space:normal!important" in css
+    assert "#calendar.timegrid-week .fc-view-harness{min-width:720px!important}" in css
+    assert "#calendar.timegrid-day .fc-view-harness{min-width:100%!important}" in css
+    assert "timegrid-week" in js and "timegrid-day" in js

@@ -409,7 +409,14 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     datesSet: (info) => {
       const calendarEl = document.getElementById('calendar');
-      calendarEl.classList.toggle('timegrid-active', info.view.type.startsWith('timeGrid'));
+      const viewType = info.view.type;
+      calendarEl.classList.toggle('timegrid-active', viewType.startsWith('timeGrid'));
+      calendarEl.classList.toggle('timegrid-week', viewType === 'timeGridWeek');
+      calendarEl.classList.toggle('timegrid-day', viewType === 'timeGridDay');
+      // Return the horizontal grid scroll to the start on view changes while
+      // keeping FullCalendar's toolbar centered at viewport width.
+      const scroll = document.getElementById('calendarScroll');
+      if (scroll && viewType.startsWith('timeGrid')) scroll.scrollLeft = 0;
       window.requestAnimationFrame(() => calendar.updateSize());
     },
     windowResize: () => {

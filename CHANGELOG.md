@@ -1,6 +1,12 @@
+## r104-full - mobile time-grid and clean re-authentication
+
+- Fixed FullCalendar week/day views on mobile by overriding the application-wide responsive table rule for FullCalendar internals; the toolbar stays centred while only the weekly grid can scroll horizontally.
+- Successful login now clears stale Flask/Flask-Login session state and queued unauthorized flashes, then creates a fresh permanent session. This removes the misleading login-required message that could survive an expired/pre-restart session until logout+login.
+- Added regression coverage for stale-session re-authentication and mobile time-grid table/layout rules.
+
 # Changelog
 
-## r103-full — Calendario mobile e statistiche
+## r104-full — Calendario mobile e statistiche
 
 - Corrette le viste mobile settimanale e giornaliera del calendario: toolbar sempre visibile e centrata, con scorrimento orizzontale limitato alla sola griglia oraria.
 - Aggiunta la voce di menu “Statistiche”.

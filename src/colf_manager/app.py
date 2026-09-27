@@ -23,6 +23,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    session,
     send_file,
     send_from_directory,
     url_for,
@@ -503,6 +504,8 @@ def create_app(test_config=None):
 
     login = LoginManager(app)
     login.login_view = "login"
+    login.login_message = "Effettua il login per accedere a questa pagina."
+    login.login_message_category = "auth-required"
     session_protection = os.getenv("COLF_MANAGER_SESSION_PROTECTION", "basic").strip().lower()
     if session_protection not in {"basic", "strong", "none"}:
         raise RuntimeError(
@@ -677,7 +680,15 @@ def create_app(test_config=None):
             if user and user.is_active and check_password_hash(
                 user.password_hash, request.form.get("password", "")
             ):
-                login_user(user)
+                # A successful login must start from a clean Flask session.
+                # This removes stale Flask-Login identifiers and queued
+                # unauthorized flashes left by an expired/pre-restart cookie.
+                # Without this reset an old "Please log in..." message can
+                # survive the new authentication until a logout/login cycle.
+                session.clear()
+                login_user(user, remember=False, fresh=True)
+                session.permanent = True
+                session.modified = True
                 audit("login", "user", user.id, user_id=user.id)
                 return redirect(url_for("settings" if user.must_change_password else "dashboard"))
             audit("login_failed", details=f"username={username}")

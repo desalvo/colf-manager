@@ -1,4 +1,4 @@
-# colf-manager 1.0.0 · build r103-full
+# colf-manager 1.0.0 · build r104-full
 
 <img src="src/colf_manager/static/logo.svg" alt="colf-manager" width="180">
 
@@ -131,3 +131,6 @@ PDF reports keep section headings with their related content on the same page wh
 
 ### Operational audit
 Administrators can use the **Audit** menu to inspect the application audit trail. Entries retain timestamp, user, action, object, client address and details. Search covers the whole archive by free text and date range. Automatic retention is configurable under **Settings → Audit** and defaults to 12 months; `0` disables automatic deletion. The Audit page can also purge records older than a chosen number of days or keep only the latest N records. Manual purge actions are themselves audited.
+
+### Sessions and mobile calendar (r104)
+A successful login always rebuilds the application session state, removing stale authentication messages left by expired or pre-restart sessions. On Kubernetes, `COLF_MANAGER_SECRET_KEY` must still come from a persistent Secret and remain stable across pod restarts. Mobile Week/Day calendar views keep the toolbar centred and only the time grid scrolls horizontally when needed.

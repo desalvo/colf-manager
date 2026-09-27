@@ -700,3 +700,38 @@ body.sidebar-collapsed .app-sidebar{width:var(--sidebar-mini)}body.sidebar-colla
 .statistics-table td,.statistics-table th{white-space:normal;overflow-wrap:anywhere}
 @media(max-width:1000px){.statistics-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.statistics-charts{grid-template-columns:1fr}}
 @media(max-width:520px){.statistics-kpis{grid-template-columns:1fr 1fr;gap:8px}.statistics-kpis article{padding:12px}.statistics-kpis strong{font-size:20px}.statistics-filter{display:grid;grid-template-columns:1fr;width:100%}.statistics-filter label,.statistics-filter button{width:100%}}
+
+/* r104: mobile FullCalendar time-grid integrity.
+   The application-wide mobile table rule uses display:block/nowrap, which is
+   appropriate for normal data tables but breaks FullCalendar's internal
+   timeGrid tables. Keep the toolbar at viewport width and scroll only the
+   weekly grid harness. */
+@media(max-width:850px){
+  #calendar .fc table,
+  #calendar .fc-scrollgrid,
+  #calendar .fc-scrollgrid table{
+    display:table!important;
+    width:100%!important;
+    overflow:visible!important;
+    white-space:normal!important;
+    table-layout:fixed;
+  }
+  #calendar .fc-timegrid-body,
+  #calendar .fc-timegrid-cols,
+  #calendar .fc-timegrid-slots{width:100%!important;min-width:0!important}
+  #calendar.timegrid-active .fc-view-harness{
+    overflow:visible!important;
+    visibility:visible!important;
+  }
+  #calendar.timegrid-week .fc-view-harness{min-width:720px!important}
+  #calendar.timegrid-day .fc-view-harness{min-width:100%!important}
+  #calendar.timegrid-week .fc-timeGridWeek-view,
+  #calendar.timegrid-day .fc-timeGridDay-view{
+    display:block!important;
+    width:100%!important;
+    min-width:0!important;
+    visibility:visible!important;
+  }
+  .calendar-scroll{overflow-x:auto!important;overflow-y:visible!important}
+  #calendar .fc-toolbar{width:100%!important;min-width:0!important;max-width:100%!important}
+}
